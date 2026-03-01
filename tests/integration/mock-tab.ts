@@ -41,18 +41,6 @@ export class MockBrowserTab implements BrowserTab {
     return this.record("doubleClick", [x, y]);
   }
 
-  async rightClick(x: number, y: number): Promise<ActionOutcome> {
-    return this.record("rightClick", [x, y]);
-  }
-
-  async mouseDown(x: number, y: number): Promise<ActionOutcome> {
-    return this.record("mouseDown", [x, y]);
-  }
-
-  async mouseUp(x: number, y: number): Promise<ActionOutcome> {
-    return this.record("mouseUp", [x, y]);
-  }
-
   async hover(x: number, y: number): Promise<ActionOutcome> {
     return this.record("hover", [x, y]);
   }

@@ -23,10 +23,11 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:live": "tsx run-test.ts",
-    "eval": "tsx eval-compare.ts",
-    "eval:quick": "tsx eval-compare.ts wikipedia_shannon",
-    "eval:lumen": "tsx eval-compare.ts --lumen-only"
+    "benchmark:setup": "bash evals/benchmark/setup.sh",
+    "benchmark": "tsx --env-file .env evals/benchmark/loop.ts",
+    "benchmark:lumen": "tsx --env-file .env evals/benchmark/loop.ts --lumen-only",
+    "benchmark:stagehand": "FRAMEWORKS=stagehand tsx --env-file .env evals/benchmark/loop.ts",
+    "benchmark:browser-use": "FRAMEWORKS=browser-use tsx --env-file .env evals/benchmark/loop.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -34,9 +35,11 @@
     "chrome-launcher": "^1.1.2",
     "openai": "^4.96.0",
     "sharp": "^0.33.5",
+    "tslib": "^2.8.1",
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@browserbasehq/stagehand": "^3.1.0",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.5.14",
     "tsx": "^4.21.0",

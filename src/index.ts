@@ -2,9 +2,12 @@
 export { Agent } from "./agent.js";
 export type { AgentOptions, AgentResult, AgentEvent, SerializedAgent, BrowserOptions } from "./types.js";
 
-// Legacy session API
-export { CUASession } from "./session.js";
-export type { CUASessionOptions } from "./session.js";
+// Logger
+export { LumenLogger } from "./logger.js";
+
+// Session API
+export { Session } from "./session.js";
+export type { SessionOptions } from "./session.js";
 
 // Types
 export type {
@@ -37,16 +40,14 @@ export type { CUAErrorCode } from "./errors.js";
 export type { BrowserTab, ClickOptions, TypeOptions, DragOptions } from "./browser/tab.js";
 export { CDPTab } from "./browser/cdptab.js";
 export { CdpConnection } from "./browser/cdp.js";
-export { ScreenCapture } from "./browser/capture.js";
 export { ViewportManager } from "./browser/viewport.js";
-export { FrameRouter } from "./browser/frame.js";
 export { launchChrome } from "./browser/launch/local.js";
 export { connectBrowserbase } from "./browser/launch/browserbase.js";
 export type { BrowserbaseOptions } from "./browser/launch/browserbase.js";
 
 // Model adapters
 export type { ModelAdapter, StepContext, ModelResponse } from "./model/adapter.js";
-export { denormalize, normalize, clampNormalized, denormalizePoint } from "./model/adapter.js";
+export { denormalize, normalize, denormalizePoint } from "./model/adapter.js";
 export { ActionDecoder } from "./model/decoder.js";
 export { AnthropicAdapter } from "./model/anthropic.js";
 export { GoogleAdapter } from "./model/google.js";
@@ -54,7 +55,6 @@ export { OpenAIAdapter } from "./model/openai.js";
 export { CustomAdapter } from "./model/custom.js";
 
 // Loop primitives (for custom integrations)
-export { FactStore } from "./loop/facts.js";
 export { StateStore } from "./loop/state.js";
 export { HistoryManager } from "./loop/history.js";
 export { ActionRouter } from "./loop/router.js";

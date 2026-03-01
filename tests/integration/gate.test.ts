@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { PerceptionLoop } from "../../src/loop/perception.js";
 import { HistoryManager } from "../../src/loop/history.js";
-import { FactStore } from "../../src/loop/facts.js";
 import { StateStore } from "../../src/loop/state.js";
 import { CustomGate } from "../../src/loop/gate.js";
 import { MockBrowserTab } from "./mock-tab.js";
@@ -28,7 +27,6 @@ describe("CompletionGate integration in PerceptionLoop", () => {
       tab,
       adapter,
       history,
-      facts: new FactStore(),
       state: new StateStore(),
       gate,
     });
@@ -53,7 +51,6 @@ describe("CompletionGate integration in PerceptionLoop", () => {
       tab,
       adapter,
       history: new HistoryManager(100_000),
-      facts: new FactStore(),
       state: new StateStore(),
       gate,
     });

@@ -32,15 +32,10 @@ export interface ScreenshotOptions {
 
 // ─── Task State ───────────────────────────────────────────────────────────────
 
-/** Structured task progress artifact written via the writeState action.
- *  Re-injected from StateStore every step — survives history compaction. */
-export interface TaskState {
-  currentUrl: string;
-  completedSteps: string[];
-  nextStep: string;
-  blockers: string[];
-  data: Record<string, unknown>;
-}
+/** Persistent structured state written by the model via writeState.
+ *  Last-write-wins, re-injected every step — survives history compaction.
+ *  Mirrors Claude Code's task state pattern: replace-on-write structured data. */
+export type TaskState = Record<string, unknown>;
 
 // ─── CUA Actions ─────────────────────────────────────────────────────────────
 
@@ -55,8 +50,7 @@ export type CUAAction =
   | { type: "keyPress"; keys: string[] }
   | { type: "wait"; ms: number }
   | { type: "goto"; url: string }
-  | { type: "memorize"; fact: string }
-  | { type: "writeState"; state: TaskState }
+  | { type: "writeState"; data: TaskState }
   | { type: "screenshot" }
   | { type: "terminate"; status: "success" | "failure"; result: string }
   | { type: "hover"; x: NormalizedCoord; y: NormalizedCoord }
@@ -104,7 +98,7 @@ export interface SemanticStep {
     action: CUAAction;
     outcome: { ok: boolean; error?: string };
   }>;
-  taskStateAfter: TaskState | null;
+  agentState: TaskState | null;
   tokenUsage: TokenUsage;
   durationMs: number;
 }
@@ -114,8 +108,7 @@ export type WireMessage = Record<string, unknown>;
 export interface SerializedHistory {
   wireHistory: WireMessage[];
   semanticSteps: SemanticStep[];
-  facts: string[];
-  taskState: TaskState | null;
+  agentState: TaskState | null;
 }
 
 // ─── Loop ─────────────────────────────────────────────────────────────────────
@@ -132,7 +125,7 @@ export interface LoopResult {
   result: string;
   steps: number;
   history: SemanticStep[];
-  finalState: TaskState | null;
+  agentState: TaskState | null;
 }
 
 // ─── Session ──────────────────────────────────────────────────────────────────
@@ -142,13 +135,15 @@ export interface CUAResult {
   result: string;
   steps: number;
   history: SemanticStep[];
-  finalState: TaskState | null;
+  agentState: TaskState | null;
   tokenUsage: TokenUsage;
 }
 
 export interface RunOptions {
   instruction: string;
   maxSteps?: number;
+  /** Navigate to this URL before the first model step. Saves 1-2 steps vs putting URL in instruction. */
+  startUrl?: string;
 }
 
 // ─── Streaming Events ─────────────────────────────────────────────────────────
@@ -160,8 +155,7 @@ export type CUAEvent =
   | { type: "action"; step: number; action: CUAAction }
   | { type: "action_result"; step: number; action: CUAAction; ok: boolean; error?: string }
   | { type: "action_blocked"; step: number; action: CUAAction; reason: string }
-  | { type: "memorized"; step: number; fact: string }
-  | { type: "state_written"; step: number; state: TaskState }
+  | { type: "state_written"; step: number; data: TaskState }
   | { type: "compaction"; step: number; tokensBefore: number; tokensAfter: number }
   | { type: "termination_rejected"; step: number; reason: string }
   | { type: "done"; result: CUAResult };
@@ -232,6 +226,5 @@ export interface AgentOptions {
   monitor?: import("./loop/monitor.js").LoopMonitor;
   /** Resume with pre-loaded history. Prefer Agent.resume() for full roundtrip. */
   initialHistory?: import("./types.js").SerializedHistory;
-  initialFacts?: string[];
   initialState?: TaskState;
 }

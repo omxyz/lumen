@@ -24,9 +24,6 @@ export interface BrowserTab {
   // Coordinate input
   click(x: number, y: number, options?: ClickOptions): Promise<ActionOutcome>;
   doubleClick(x: number, y: number): Promise<ActionOutcome>;
-  rightClick(x: number, y: number): Promise<ActionOutcome>;
-  mouseDown(x: number, y: number): Promise<ActionOutcome>;
-  mouseUp(x: number, y: number): Promise<ActionOutcome>;
   hover(x: number, y: number): Promise<ActionOutcome>;
   drag(fromX: number, fromY: number, toX: number, toY: number, options?: DragOptions): Promise<ActionOutcome>;
   scroll(x: number, y: number, deltaX: number, deltaY: number): Promise<ActionOutcome>;

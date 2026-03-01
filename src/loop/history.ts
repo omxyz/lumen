@@ -117,11 +117,11 @@ export class HistoryManager {
    *  Triggered proactively at 80% token utilization, not when forced by limit. */
   async compactWithSummary(
     adapter: ModelAdapter,
-    currentState: TaskState | null,
+    agentState: TaskState | null,
   ): Promise<{ tokensBefore: number; tokensAfter: number }> {
     const tokensBefore = this.totalInputTokens;
 
-    const summary = await adapter.summarize(this.wire, currentState);
+    const summary = await adapter.summarize(this.wire, agentState);
 
     // Replace entire wire history with the summary anchor + reset token counter
     this.wire = [
@@ -138,23 +138,22 @@ export class HistoryManager {
 
   // ─── Serialization ──────────────────────────────────────────────────────────
 
-  toJSON(facts: string[], taskState: TaskState | null): SerializedHistory {
+  toJSON(agentState: Record<string, unknown> | null): SerializedHistory {
     return {
       wireHistory: this.wire,
       semanticSteps: this.semantic,
-      facts,
-      taskState,
+      agentState,
     };
   }
 
   static fromJSON(
     data: SerializedHistory,
     contextWindowTokens: number,
-  ): { history: HistoryManager; facts: string[]; taskState: TaskState | null } {
+  ): { history: HistoryManager; agentState: TaskState | null } {
     const history = new HistoryManager(contextWindowTokens);
     history.wire = data.wireHistory;
     history.semantic = data.semanticSteps;
-    return { history, facts: data.facts, taskState: data.taskState };
+    return { history, agentState: data.agentState };
   }
 
   // ─── Aggregate usage ────────────────────────────────────────────────────────

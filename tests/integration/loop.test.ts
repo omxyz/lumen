@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { PerceptionLoop } from "../../src/loop/perception.js";
 import { HistoryManager } from "../../src/loop/history.js";
-import { FactStore } from "../../src/loop/facts.js";
 import { StateStore } from "../../src/loop/state.js";
 import { SessionPolicy } from "../../src/loop/policy.js";
 import { MockBrowserTab } from "./mock-tab.js";
@@ -9,9 +8,8 @@ import { MockAdapter } from "./mock-adapter.js";
 
 function makeLoop(adapter: MockAdapter, tab: MockBrowserTab, policy?: SessionPolicy) {
   const history = new HistoryManager(100_000);
-  const facts = new FactStore();
   const state = new StateStore();
-  return new PerceptionLoop({ tab, adapter, history, facts, state, policy });
+  return new PerceptionLoop({ tab, adapter, history, state, policy });
 }
 
 describe("PerceptionLoop", () => {
@@ -46,7 +44,7 @@ describe("PerceptionLoop", () => {
     const tab = new MockBrowserTab();
     const history = new HistoryManager(100_000);
     const loop = new PerceptionLoop({
-      tab, adapter, history, facts: new FactStore(), state: new StateStore(),
+      tab, adapter, history, state: new StateStore(),
     });
     const result = await loop.run({ maxSteps: 10 });
     expect(result.history.length).toBeGreaterThan(0);

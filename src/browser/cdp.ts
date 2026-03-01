@@ -1,4 +1,5 @@
 import { WebSocket } from "ws";
+import { LumenLogger } from "../logger.js";
 
 interface CDPMessage {
   id?: number;
@@ -15,6 +16,23 @@ export interface CDPSessionLike {
   off(event: string, handler: (params: unknown) => void): void;
 }
 
+// Commands to skip in CDP logging — too noisy or result is megabytes
+const SKIP_CDP_CMDS = new Set([
+  "Page.captureScreenshot",   // result is base64 image data
+  "Runtime.evaluate",         // result can be large; callers log at a higher level
+  "Input.dispatchMouseEvent", // ~3 calls per click; covered by ActionRouter logging
+  "Input.dispatchKeyEvent",   // noisy; covered by ActionRouter logging
+  "Input.insertText",         // covered by ActionRouter logging
+]);
+
+// CDP events to skip in general logging (handled with a special case below)
+const SKIP_CDP_EVENTS = new Set([
+  "Page.frameStartedLoading",
+  "Page.frameStoppedLoading",
+  "Page.domContentEventFired",
+  "Page.lifecycleEvent",       // logged selectively below (networkIdle, load, commit)
+]);
+
 export class CdpSession implements CDPSessionLike {
   private nextId = 1;
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
@@ -23,6 +41,7 @@ export class CdpSession implements CDPSessionLike {
   constructor(
     private readonly send_: (msg: Record<string, unknown>) => void,
     private readonly sessionId?: string,
+    private readonly log: LumenLogger = LumenLogger.NOOP,
   ) {}
 
   async send<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> {
@@ -30,8 +49,30 @@ export class CdpSession implements CDPSessionLike {
     const msg: Record<string, unknown> = { id, method };
     if (params) msg.params = params;
     if (this.sessionId) msg.sessionId = this.sessionId;
+
+    const shouldLog = !SKIP_CDP_CMDS.has(method);
+    if (shouldLog) {
+      const pStr = params ? JSON.stringify(params).slice(0, 200) : "";
+      this.log.cdp(`→ ${method}${pStr ? " " + pStr : ""}`, { id });
+    }
+
+    const t0 = Date.now();
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
+      this.pending.set(id, {
+        resolve: (v: unknown) => {
+          if (shouldLog) {
+            const elapsed = Date.now() - t0;
+            const rStr = JSON.stringify(v ?? {}).slice(0, 200);
+            this.log.cdp(`← ${method} (${elapsed}ms) ${rStr}`, { id, elapsed });
+          }
+          (resolve as (v: unknown) => void)(v);
+        },
+        reject: (e: Error) => {
+          const elapsed = Date.now() - t0;
+          this.log.cdp(`✗ ${method} (${elapsed}ms) ERROR: ${e.message}`, { id, elapsed, error: e.message });
+          reject(e);
+        },
+      });
       this.send_(msg);
     });
   }
@@ -57,6 +98,18 @@ export class CdpSession implements CDPSessionLike {
         }
       }
     } else if (msg.method) {
+      // Selective lifecycle event logging
+      if (msg.method === "Page.lifecycleEvent") {
+        const p = msg.params as { name?: string };
+        if (p?.name === "networkIdle" || p?.name === "load" || p?.name === "commit") {
+          this.log.cdp(`ev Page.lifecycleEvent name=${p.name}`);
+        }
+        // other lifecycle events (DOMContentLoaded, etc.) are silently skipped
+      } else if (!SKIP_CDP_EVENTS.has(msg.method)) {
+        const pStr = JSON.stringify(msg.params ?? {}).slice(0, 200);
+        this.log.cdp(`ev ${msg.method} ${pStr}`);
+      }
+
       const handlers = this.listeners.get(msg.method);
       if (handlers) {
         for (const handler of handlers) {
@@ -67,6 +120,9 @@ export class CdpSession implements CDPSessionLike {
   }
 
   _rejectAll(err: Error): void {
+    if (this.pending.size > 0) {
+      this.log.cdp(`_rejectAll: rejecting ${this.pending.size} pending call(s): ${err.message}`);
+    }
     for (const { reject } of this.pending.values()) reject(err);
     this.pending.clear();
   }
@@ -76,21 +132,24 @@ export class CdpConnection {
   private ws: WebSocket;
   private main: CdpSession;
   private sessions = new Map<string, CdpSession>();
+  private readonly log: LumenLogger;
 
-  private constructor(ws: WebSocket, main: CdpSession) {
+  private constructor(ws: WebSocket, main: CdpSession, log: LumenLogger) {
     this.ws = ws;
     this.main = main;
+    this.log = log;
   }
 
-  static connect(wsUrl: string): Promise<CdpConnection> {
+  static connect(wsUrl: string, log: LumenLogger = LumenLogger.NOOP): Promise<CdpConnection> {
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(wsUrl);
       let conn: CdpConnection;
 
       ws.on("open", () => {
+        log.cdp(`connected: ${wsUrl}`);
         const send_ = (msg: Record<string, unknown>) => ws.send(JSON.stringify(msg));
-        const mainSession = new CdpSession(send_);
-        conn = new CdpConnection(ws, mainSession);
+        const mainSession = new CdpSession(send_, undefined, log);
+        conn = new CdpConnection(ws, mainSession, log);
         resolve(conn);
       });
 
@@ -108,14 +167,14 @@ export class CdpConnection {
       });
 
       ws.on("error", (err) => {
-        console.error(`[cdp] WebSocket error: ${err}`);
+        log.error(`[cdp] WebSocket error: ${(err as Error).message}`, { url: wsUrl });
         reject(err);
         conn?.main._rejectAll(err as Error);
         for (const s of conn?.sessions?.values() ?? []) s._rejectAll(err as Error);
       });
 
       ws.on("close", (code, reason) => {
-        console.error(`[cdp] WebSocket closed — code=${code} reason="${reason.toString()}"`);
+        log.warn(`[cdp] WebSocket closed`, { code, reason: reason.toString() });
         const err = new Error("CDP WebSocket closed");
         conn?.main._rejectAll(err);
         for (const s of conn?.sessions?.values() ?? []) s._rejectAll(err);
@@ -136,7 +195,7 @@ export class CdpConnection {
       flatten: true,
     });
     const send_ = (msg: Record<string, unknown>) => this.ws.send(JSON.stringify(msg));
-    const session = new CdpSession(send_, result.sessionId);
+    const session = new CdpSession(send_, result.sessionId, this.log);
     this.sessions.set(result.sessionId, session);
     return session;
   }

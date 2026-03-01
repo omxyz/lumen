@@ -3,8 +3,7 @@ import type { CUAAction, ScreenshotResult, TaskState, TokenUsage, ViewportSize, 
 export interface StepContext {
   screenshot: ScreenshotResult;
   wireHistory: WireMessage[];
-  factStore: string[];
-  taskState: TaskState | null;
+  agentState: TaskState | null;
   stepIndex: number;
   maxSteps: number;
   url: string;
@@ -45,7 +44,7 @@ export interface ModelAdapter {
   estimateTokens(context: StepContext): number;
 
   /** Called by HistoryManager.compactWithSummary() to generate the <summary> block. */
-  summarize(wireHistory: WireMessage[], currentState: TaskState | null): Promise<string>;
+  summarize(wireHistory: WireMessage[], agentState: TaskState | null): Promise<string>;
 }
 
 // ─── Coordinate helpers ───────────────────────────────────────────────────────

@@ -5,7 +5,6 @@ import type { LoopMonitor } from "./loop/monitor.js";
 import type { RouterTiming } from "./loop/router.js";
 import type { SessionPolicyOptions } from "./loop/policy.js";
 import { SessionPolicy } from "./loop/policy.js";
-import { FactStore } from "./loop/facts.js";
 import { StateStore } from "./loop/state.js";
 import { HistoryManager } from "./loop/history.js";
 import { PerceptionLoop } from "./loop/perception.js";
@@ -16,9 +15,9 @@ import type {
   SerializedHistory,
   TaskState,
 } from "./types.js";
-import { CUAError } from "./errors.js";
+import { LumenLogger } from "./logger.js";
 
-export interface CUASessionOptions {
+export interface SessionOptions {
   /** Browser connection — bring your own tab (CDPTab, BrowserbaseTab, etc.) */
   tab: BrowserTab;
 
@@ -60,53 +59,52 @@ export interface CUASessionOptions {
 
   /** Resume from a serialized session. */
   initialHistory?: SerializedHistory;
-  initialFacts?: string[];
   initialState?: TaskState;
+
+  /** Granular debug logger — threaded into PerceptionLoop, ActionRouter, and HistoryManager. */
+  log?: LumenLogger;
 }
 
-export class CUASession {
+export class Session {
   readonly tab: BrowserTab;
 
   private readonly adapter: ModelAdapter;
-  private readonly opts: CUASessionOptions;
+  private readonly opts: SessionOptions;
   private history: HistoryManager;
-  private facts: FactStore;
   private state: StateStore;
-  private initialized = false;
+  private readonly log: LumenLogger;
 
-  constructor(opts: CUASessionOptions) {
+  constructor(opts: SessionOptions) {
     this.tab = opts.tab;
     this.adapter = opts.adapter;
     this.opts = opts;
+    this.log = opts.log ?? LumenLogger.NOOP;
     this.history = new HistoryManager(opts.adapter.contextWindowTokens);
-    this.facts = new FactStore();
     this.state = new StateStore();
 
-    if (opts.initialFacts) {
-      this.facts.load(opts.initialFacts);
-    }
     if (opts.initialState) {
       this.state.load(opts.initialState);
     }
     if (opts.initialHistory) {
-      const { history, facts, taskState } = HistoryManager.fromJSON(
+      const { history, agentState } = HistoryManager.fromJSON(
         opts.initialHistory,
         opts.adapter.contextWindowTokens,
       );
       this.history = history;
-      this.facts.load(facts);
-      this.state.load(taskState);
+      this.state.load(agentState);
+      this.log.loop(
+        `session resumed: wire=${history.wireHistory().length}msgs hasState=${agentState !== null}`,
+        { wireLen: history.wireHistory().length, hasState: agentState !== null },
+      );
     }
-  }
-
-  async init(): Promise<void> {
-    this.initialized = true;
   }
 
   async run(options: RunOptions): Promise<CUAResult> {
-    if (!this.initialized) {
-      throw new CUAError("INIT_REQUIRED", "Call session.init() before session.run()");
-    }
+    const maxSteps = options.maxSteps ?? this.opts.maxSteps ?? 30;
+    this.log.loop(
+      `session.run: instruction="${options.instruction?.slice(0, 80)}" maxSteps=${maxSteps}`,
+      { maxSteps, instructionLen: options.instruction?.length ?? 0 },
+    );
 
     const policy = this.opts.policy ? new SessionPolicy(this.opts.policy) : undefined;
 
@@ -114,7 +112,6 @@ export class CUASession {
       tab: this.tab,
       adapter: this.adapter,
       history: this.history,
-      facts: this.facts,
       state: this.state,
       policy,
       gate: this.opts.completionGate,
@@ -124,6 +121,7 @@ export class CUASession {
       keepRecentScreenshots: this.opts.keepRecentScreenshots,
       cursorOverlay: this.opts.cursorOverlay,
       compactionAdapter: this.opts.compactionAdapter,
+      log: this.log,
     });
 
     // Prepend the per-run instruction to the session-level system prompt
@@ -133,10 +131,15 @@ export class CUASession {
     ].filter(Boolean).join("\n\n") || undefined;
 
     const loopResult = await loop.run({
-      maxSteps: options.maxSteps ?? this.opts.maxSteps ?? 30,
+      maxSteps,
       systemPrompt,
       compactionThreshold: this.opts.compactionThreshold,
     });
+
+    this.log.loop(
+      `session.run done: status=${loopResult.status} steps=${loopResult.steps}`,
+      { status: loopResult.status, steps: loopResult.steps },
+    );
 
     return {
       ...loopResult,
@@ -145,11 +148,11 @@ export class CUASession {
   }
 
   serialize(): SerializedHistory {
-    return this.history.toJSON(this.facts.all(), this.state.current());
+    return this.history.toJSON(this.state.current());
   }
 
-  static resume(data: SerializedHistory, opts: Omit<CUASessionOptions, "initialHistory">): CUASession {
-    return new CUASession({ ...opts, initialHistory: data });
+  static resume(data: SerializedHistory, opts: Omit<SessionOptions, "initialHistory">): Session {
+    return new Session({ ...opts, initialHistory: data });
   }
 
   async close(): Promise<void> {

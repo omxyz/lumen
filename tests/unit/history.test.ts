@@ -17,7 +17,7 @@ function makeSemanticStep(stepIndex: number): SemanticStep {
     url: "https://example.com",
     screenshotBase64: "abc123",
     actions: [],
-    taskStateAfter: null,
+    agentState: null,
     tokenUsage: { inputTokens: 100, outputTokens: 50 },
     durationMs: 500,
   };
@@ -64,18 +64,10 @@ describe("HistoryManager", () => {
     const h = new HistoryManager(100_000);
     h.appendResponse(makeResponse(500));
     h.appendSemanticStep(makeSemanticStep(0));
-    const facts = ["fact1", "fact2"];
-    const state = {
-      currentUrl: "https://example.com",
-      completedSteps: [],
-      nextStep: "next",
-      blockers: [],
-      data: {},
-    };
-    const json = h.toJSON(facts, state);
-    const { history: h2, facts: f2, taskState: s2 } = HistoryManager.fromJSON(json, 100_000);
+    const state = { min_price: "£3.49", min_title: "Sharp Objects" };
+    const json = h.toJSON(state);
+    const { history: h2, agentState: s2 } = HistoryManager.fromJSON(json, 100_000);
     expect(h2.wireHistory()).toHaveLength(h.wireHistory().length);
-    expect(f2).toEqual(facts);
     expect(s2).toEqual(state);
   });
 

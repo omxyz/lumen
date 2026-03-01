@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { PerceptionLoop } from "../../src/loop/perception.js";
 import { HistoryManager } from "../../src/loop/history.js";
-import { FactStore } from "../../src/loop/facts.js";
 import { StateStore } from "../../src/loop/state.js";
 import { MockBrowserTab } from "./mock-tab.js";
 import { MockAdapter } from "./mock-adapter.js";
@@ -21,7 +20,6 @@ describe("PreActionHook integration in PerceptionLoop", () => {
       tab,
       adapter,
       history: new HistoryManager(100_000),
-      facts: new FactStore(),
       state: new StateStore(),
       preActionHook: async (action: CUAAction) => {
         if (action.type === "click") {
@@ -51,7 +49,6 @@ describe("PreActionHook integration in PerceptionLoop", () => {
       tab,
       adapter,
       history: new HistoryManager(100_000),
-      facts: new FactStore(),
       state: new StateStore(),
       preActionHook: async (_action: CUAAction) => ({ decision: "allow" }),
     });
@@ -73,7 +70,6 @@ describe("PreActionHook integration in PerceptionLoop", () => {
       tab,
       adapter,
       history: new HistoryManager(100_000),
-      facts: new FactStore(),
       state: new StateStore(),
       preActionHook: async (_action: CUAAction) => {
         hookOrder.push("hook");

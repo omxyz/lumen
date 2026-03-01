@@ -6,7 +6,6 @@ const mockState: TaskState = {
   currentUrl: "https://example.com",
   completedSteps: ["step1"],
   nextStep: "step2",
-  blockers: [],
   data: { key: "value" },
 };
 
@@ -26,21 +25,8 @@ describe("StateStore", () => {
     const store = new StateStore();
     store.write(mockState);
     const current = store.current()!;
-    current.currentUrl = "https://modified.com";
-    expect(store.current()!.currentUrl).toBe("https://example.com");
-  });
-
-  it("toContextString returns empty for null state", () => {
-    const store = new StateStore();
-    expect(store.toContextString()).toBe("");
-  });
-
-  it("toContextString includes URL and steps", () => {
-    const store = new StateStore();
-    store.write(mockState);
-    const str = store.toContextString();
-    expect(str).toContain("https://example.com");
-    expect(str).toContain("step2");
+    (current as Record<string, unknown>).currentUrl = "https://modified.com";
+    expect((store.current() as Record<string, unknown>).currentUrl).toBe("https://example.com");
   });
 
   it("load sets state from persisted value", () => {

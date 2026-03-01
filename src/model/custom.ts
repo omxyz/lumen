@@ -127,18 +127,6 @@ const CUA_FUNCTION_TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "memorize",
-      description: "Store an important fact for future steps.",
-      parameters: {
-        type: "object",
-        properties: { fact: { type: "string" } },
-        required: ["fact"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
       name: "screenshot",
       description: "Take a screenshot to see the current state.",
       parameters: { type: "object", properties: {} },
@@ -181,11 +169,8 @@ function buildSystemPrompt(context: StepContext): string {
     "Use the provided tools to interact with the browser. All coordinates are 0-1000 normalized (0=top-left, 1000=bottom-right).",
     "Call terminate() when the task is complete.",
   ];
-  if (context.factStore.length > 0) {
-    parts.push("Memory:\n" + context.factStore.map((f) => `- ${f}`).join("\n"));
-  }
-  if (context.taskState) {
-    parts.push(`Task state: ${JSON.stringify(context.taskState)}`);
+  if (context.agentState && Object.keys(context.agentState).length > 0) {
+    parts.push(`Current state: ${JSON.stringify(context.agentState)}`);
   }
   return parts.join("\n\n");
 }
@@ -261,7 +246,7 @@ export class CustomAdapter implements ModelAdapter {
     return context.wireHistory.length * 200 + 1500;
   }
 
-  async summarize(wireHistory: WireMessage[], currentState: TaskState | null): Promise<string> {
+  async summarize(wireHistory: WireMessage[], currentState: Record<string, unknown> | null): Promise<string> {
     const response = await this.client.chat.completions.create({
       model: this.modelId,
       messages: [{

@@ -21,7 +21,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PerceptionLoop } from "../../src/loop/perception.js";
 import { HistoryManager } from "../../src/loop/history.js";
-import { FactStore } from "../../src/loop/facts.js";
 import { StateStore } from "../../src/loop/state.js";
 import { MockBrowserTab } from "./mock-tab.js";
 import { MockAdapter } from "./mock-adapter.js";
@@ -30,9 +29,8 @@ import { MockAdapter } from "./mock-adapter.js";
 
 function makeLoop(adapter: MockAdapter, tab: MockBrowserTab) {
   const history = new HistoryManager(100_000);
-  const facts = new FactStore();
   const state = new StateStore();
-  return new PerceptionLoop({ tab, adapter, history, facts, state });
+  return new PerceptionLoop({ tab, adapter, history, state });
 }
 
 // ─── Challenge 1: Empty actions (text-only response) ────────────────────────

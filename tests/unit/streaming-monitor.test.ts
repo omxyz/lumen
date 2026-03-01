@@ -13,8 +13,7 @@ const mockScreenshot = {
 const mockContext: StepContext = {
   screenshot: mockScreenshot,
   wireHistory: [],
-  factStore: [],
-  taskState: null,
+  agentState: null,
   stepIndex: 0,
   maxSteps: 10,
   url: "https://example.com",
@@ -31,7 +30,7 @@ const mockResult: CUAResult = {
   result: "done",
   steps: 1,
   history: [],
-  finalState: null,
+  agentState: null,
   tokenUsage: { inputTokens: 100, outputTokens: 50 },
 };
 
@@ -100,9 +99,9 @@ describe("StreamingMonitor", () => {
     expect(events.find((e) => e.type === "action_result")).toBeDefined();
   });
 
-  it("emits memorized event when memorize action is executed", async () => {
+  it("emits state_written event when writeState action is executed", async () => {
     const monitor = new StreamingMonitor();
-    const action: CUAAction = { type: "memorize", fact: "test fact" };
+    const action: CUAAction = { type: "writeState", data: { min_price: "£3.49" } };
 
     monitor.actionExecuted(0, action, { ok: true });
     monitor.complete(mockResult);
@@ -112,10 +111,10 @@ describe("StreamingMonitor", () => {
       events.push(event);
     }
 
-    const memorizedEvent = events.find((e) => e.type === "memorized");
-    expect(memorizedEvent).toBeDefined();
-    if (memorizedEvent?.type === "memorized") {
-      expect(memorizedEvent.fact).toBe("test fact");
+    const stateEvent = events.find((e) => e.type === "state_written");
+    expect(stateEvent).toBeDefined();
+    if (stateEvent?.type === "state_written") {
+      expect(stateEvent.data).toEqual({ min_price: "£3.49" });
     }
   });
 
@@ -183,8 +182,6 @@ describe("StreamingMonitor", () => {
       events.push(event);
     }
 
-    // Generator should have terminated naturally
-    // No infinite loop or hanging
     expect(events[events.length - 1]?.type).toBe("done");
   });
 });

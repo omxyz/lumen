@@ -9,8 +9,7 @@ export async function runPlanner(
   const response = await adapter.step({
     screenshot,
     wireHistory: [],
-    factStore: [],
-    taskState: null,
+    agentState: null,
     stepIndex: 0,
     maxSteps: 1,
     url: "",

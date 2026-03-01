@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { PerceptionLoop } from "../../src/loop/perception.js";
 import { HistoryManager } from "../../src/loop/history.js";
-import { FactStore } from "../../src/loop/facts.js";
 import { StateStore } from "../../src/loop/state.js";
 import { MockBrowserTab } from "./mock-tab.js";
 import { MockAdapter } from "./mock-adapter.js";
@@ -66,7 +65,6 @@ describe("Compaction integration in PerceptionLoop", () => {
       tab,
       adapter: adapter as unknown as import("../../src/model/adapter.js").ModelAdapter,
       history: new HistoryManager(100_000), // 100k context, 90k tokens = 90% utilization
-      facts: new FactStore(),
       state: new StateStore(),
       monitor: {
         stepStarted() {},
@@ -99,7 +97,6 @@ describe("Compaction integration in PerceptionLoop", () => {
       tab,
       adapter,
       history: new HistoryManager(100_000),
-      facts: new FactStore(),
       state: new StateStore(),
       monitor: {
         stepStarted() {},

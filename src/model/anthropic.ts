@@ -11,11 +11,20 @@ function buildSystemPrompt(context: StepContext): string {
   if (context.systemPrompt) parts.push(context.systemPrompt);
   parts.push(`You are a computer use agent. Current URL: ${context.url || "(unknown)"}`);
   parts.push(`Step ${context.stepIndex + 1} of ${context.maxSteps}`);
-  if (context.factStore.length > 0) {
-    parts.push("Memory:\n" + context.factStore.map((f) => `- ${f}`).join("\n"));
-  }
-  if (context.taskState) {
-    parts.push(`Task state: ${JSON.stringify(context.taskState)}`);
+  parts.push(
+    "TOOLS AVAILABLE:\n" +
+    "- computer: click, scroll, type, press keys\n" +
+    "- navigate: go to a URL (use this instead of clicking the address bar)\n" +
+    "- update_state: persist any data you need across scrolls/pages. Call it with ALL data collected so far — it replaces the previous state entirely. Use for running best values, collected facts, page counts, etc.\n" +
+    "- task_complete: CALL THIS when you have the final answer\n\n" +
+    "CRITICAL RULES:\n" +
+    "1. NEVER call computer with action=screenshot — screenshots are provided automatically each step.\n" +
+    "2. When collecting data across scrolls or pages: after each scroll, call update_state with everything found so far. For min/max tasks: update_state({data: {min_price: '£3.49', min_title: 'Sharp Objects'}}). update_state REPLACES the previous state — always include the current best even if unchanged.\n" +
+    "3. Once you have processed ALL pages, call task_complete immediately. Do NOT go back to re-verify pages you already scrolled through — trust your recorded state.\n" +
+    "4. Call task_complete immediately once you have the complete answer. Do NOT keep browsing.",
+  );
+  if (context.agentState && Object.keys(context.agentState).length > 0) {
+    parts.push(`Current state: ${JSON.stringify(context.agentState)}`);
   }
   return parts.join("\n\n");
 }
@@ -70,13 +79,43 @@ function buildMessages(context: StepContext): Anthropic.MessageParam[] {
         const actions = msg.actions as CUAAction[];
         const toolCallIds = (msg.tool_call_ids as string[] | undefined) ?? [];
         for (let i = 0; i < actions.length; i++) {
-          const id = toolCallIds[i] ?? `toolu_${i}_${actions[i]!.type}`;
-          content.push({
-            type: "tool_use" as const,
-            id,
-            name: "computer",
-            input: actions[i],
-          } as unknown as Anthropic.ContentBlock);
+          const action = actions[i]!;
+          const id = toolCallIds[i] ?? `toolu_${i}_${action.type}`;
+          if (action.type === "terminate") {
+            if (id === "text_end_turn") {
+              // Text-only response: no tool_use block was emitted — skip
+            } else {
+              // task_complete tool call — replay with correct tool name
+              content.push({
+                type: "tool_use" as const,
+                id,
+                name: "task_complete",
+                input: { result: (action as { result: string }).result },
+              } as unknown as Anthropic.ContentBlock);
+            }
+          } else if (action.type === "goto") {
+            // navigate tool call — replay with correct tool name
+            content.push({
+              type: "tool_use" as const,
+              id,
+              name: "navigate",
+              input: { url: (action as { url: string }).url },
+            } as unknown as Anthropic.ContentBlock);
+          } else if (action.type === "writeState") {
+            content.push({
+              type: "tool_use" as const,
+              id,
+              name: "update_state",
+              input: { data: action.data },
+            } as unknown as Anthropic.ContentBlock);
+          } else {
+            content.push({
+              type: "tool_use" as const,
+              id,
+              name: "computer",
+              input: action,
+            } as unknown as Anthropic.ContentBlock);
+          }
         }
       }
       if (content.length > 0) {
@@ -84,14 +123,19 @@ function buildMessages(context: StepContext): Anthropic.MessageParam[] {
       }
     } else if (msg.role === "tool_result") {
       const toolUseId = (msg.tool_call_id as string | undefined) ?? `toolu_unknown`;
-      pendingUserContent = [...pendingUserContent, {
-        type: "tool_result" as const,
-        tool_use_id: toolUseId,
-        content: (msg.ok as boolean)
-          ? "Action completed successfully"
-          : `Error: ${(msg.error as string | undefined) ?? "unknown"}`,
-        ...(!(msg.ok as boolean) ? { is_error: true as const } : {}),
-      } as unknown as Anthropic.ImageBlockParam];
+      // Skip tool_results for text-only terminations (no matching tool_use block)
+      if (toolUseId === "text_end_turn") {
+        // nothing — no tool_use was emitted for this
+      } else {
+        pendingUserContent = [...pendingUserContent, {
+          type: "tool_result" as const,
+          tool_use_id: toolUseId,
+          content: (msg.ok as boolean)
+            ? "Action completed successfully"
+            : `Error: ${(msg.error as string | undefined) ?? "unknown"}`,
+          ...(!(msg.ok as boolean) ? { is_error: true as const } : {}),
+        } as unknown as Anthropic.ImageBlockParam];
+      }
     } else if (msg.role === "summary") {
       pendingUserContent = [...pendingUserContent, {
         type: "text",
@@ -153,12 +197,51 @@ export class AnthropicAdapter implements ModelAdapter {
       max_tokens: this.thinkingBudget > 0 ? this.thinkingBudget + 4096 : 4096,
       system: systemPrompt,
       messages,
-      tools: [{
-        type: toolType as "computer_20250124",
-        name: "computer",
-        display_width_px: context.screenshot.width,
-        display_height_px: context.screenshot.height,
-      }],
+      tools: [
+        {
+          type: toolType as "computer_20250124",
+          name: "computer",
+          display_width_px: context.screenshot.width,
+          display_height_px: context.screenshot.height,
+        },
+        {
+          name: "navigate",
+          description: "Navigate the browser to a URL. Use this instead of clicking the address bar.",
+          input_schema: {
+            type: "object" as const,
+            properties: {
+              url: { type: "string", description: "The full URL to navigate to (include https://)" },
+            },
+            required: ["url"],
+          },
+        } as unknown as Anthropic.Beta.BetaTool,
+        {
+          name: "update_state",
+          description: "Persist data you need to remember across scrolls/pages. Replaces previous state on every call — include ALL data collected so far. Use for running best values, current minimum price, page count, any facts needed later.",
+          input_schema: {
+            type: "object" as const,
+            properties: {
+              data: {
+                type: "object" as const,
+                description: "Structured tracking data, e.g. {\"min_price\": \"£3.49\", \"min_title\": \"Sharp Objects\"}",
+                additionalProperties: true,
+              },
+            },
+            required: ["data"],
+          },
+        } as unknown as Anthropic.Beta.BetaTool,
+        {
+          name: "task_complete",
+          description: "Call this when you have found the answer to the task. Provide your complete final answer in the 'result' field.",
+          input_schema: {
+            type: "object" as const,
+            properties: {
+              result: { type: "string", description: "Your final answer to the task" },
+            },
+            required: ["result"],
+          },
+        } as unknown as Anthropic.Beta.BetaTool,
+      ],
       betas,
     };
 
@@ -177,19 +260,41 @@ export class AnthropicAdapter implements ModelAdapter {
     const actions: CUAAction[] = [];
     const toolCallIds: string[] = [];
     let thinking: string | undefined;
+    let finalText = "";
 
     for (const block of response.content) {
       if (block.type === "thinking") {
         thinking = (block as { type: "thinking"; thinking: string }).thinking;
       } else if (block.type === "tool_use") {
         const toolBlock = block as { type: "tool_use"; id: string; name: string; input: Record<string, unknown> };
-        actions.push(decoder.fromAnthropic(toolBlock, {
-          width: context.screenshot.width,
-          height: context.screenshot.height,
-        }));
-        // Capture the real tool_use ID from the API response for correlation
-        toolCallIds.push(toolBlock.id);
+        if (toolBlock.name === "task_complete") {
+          const result = (toolBlock.input.result as string) ?? "";
+          actions.push({ type: "terminate", status: "success", result });
+          toolCallIds.push(toolBlock.id);
+        } else if (toolBlock.name === "navigate") {
+          const url = (toolBlock.input.url as string) ?? "";
+          actions.push({ type: "goto", url });
+          toolCallIds.push(toolBlock.id);
+        } else if (toolBlock.name === "update_state") {
+          const data = (toolBlock.input.data as TaskState) ?? {};
+          actions.push({ type: "writeState", data });
+          toolCallIds.push(toolBlock.id);
+        } else {
+          actions.push(decoder.fromAnthropic(toolBlock, {
+            width: context.screenshot.width,
+            height: context.screenshot.height,
+          }));
+          toolCallIds.push(toolBlock.id);
+        }
+      } else if (block.type === "text") {
+        finalText = (block as { type: "text"; text: string }).text.trim();
       }
+    }
+
+    // Fallback: text-only end_turn (model ignored task_complete tool) → treat as task completion
+    if (actions.length === 0 && finalText && response.stop_reason === "end_turn") {
+      actions.push({ type: "terminate", status: "success", result: finalText });
+      toolCallIds.push("text_end_turn");
     }
 
     return {
@@ -225,12 +330,51 @@ export class AnthropicAdapter implements ModelAdapter {
       max_tokens: this.thinkingBudget > 0 ? this.thinkingBudget + 4096 : 4096,
       system: systemPrompt,
       messages,
-      tools: [{
-        type: toolType as "computer_20250124",
-        name: "computer",
-        display_width_px: context.screenshot.width,
-        display_height_px: context.screenshot.height,
-      }],
+      tools: [
+        {
+          type: toolType as "computer_20250124",
+          name: "computer",
+          display_width_px: context.screenshot.width,
+          display_height_px: context.screenshot.height,
+        },
+        {
+          name: "navigate",
+          description: "Navigate the browser to a URL. Use this instead of clicking the address bar.",
+          input_schema: {
+            type: "object" as const,
+            properties: {
+              url: { type: "string", description: "The full URL to navigate to (include https://)" },
+            },
+            required: ["url"],
+          },
+        },
+        {
+          name: "update_state",
+          description: "Persist data you need to remember across scrolls/pages. Replaces previous state on every call — include ALL data collected so far. Use for running best values, current minimum price, page count, any facts needed later.",
+          input_schema: {
+            type: "object" as const,
+            properties: {
+              data: {
+                type: "object" as const,
+                description: "Structured tracking data, e.g. {\"min_price\": \"£3.49\", \"min_title\": \"Sharp Objects\"}",
+                additionalProperties: true,
+              },
+            },
+            required: ["data"],
+          },
+        },
+        {
+          name: "task_complete",
+          description: "Call this when you have found the answer to the task. Provide your complete final answer in the 'result' field.",
+          input_schema: {
+            type: "object" as const,
+            properties: {
+              result: { type: "string", description: "Your final answer to the task" },
+            },
+            required: ["result"],
+          },
+        },
+      ],
       betas,
       ...(this.thinkingBudget > 0 ? { thinking: { type: "enabled" as const, budget_tokens: this.thinkingBudget } } : {}),
     };
@@ -238,6 +382,7 @@ export class AnthropicAdapter implements ModelAdapter {
     // Accumulate partial JSON inputs and metadata for each content block
     const blockInputs = new Map<number, string>();
     const blockIds = new Map<number, string>();
+    const blockNames = new Map<number, string>();
     const allActions: CUAAction[] = [];
     const allToolCallIds: string[] = [];
     let inputTokens = 0;
@@ -245,6 +390,10 @@ export class AnthropicAdapter implements ModelAdapter {
     let thinking: string | undefined;
     let currentBlockIndex = -1;
     let currentBlockType = "";
+    // Track text content — when model responds with text only (end_turn, no tool_use),
+    // that IS the final answer. We emit a synthetic terminate action.
+    let finalTextAccum = "";
+    let pendingTerminate: CUAAction | null = null;
 
     // Use try-finally so _lastStreamResponse is always set even if consumer breaks early
     try {
@@ -257,17 +406,23 @@ export class AnthropicAdapter implements ModelAdapter {
         if (evType === "message_start") {
           inputTokens = (event as { message: { usage: { input_tokens: number } } }).message.usage.input_tokens;
         } else if (evType === "content_block_start") {
-          const ev = event as { index: number; content_block: { type: string; id?: string } };
+          const ev = event as { index: number; content_block: { type: string; id?: string; name?: string } };
           currentBlockIndex = ev.index;
           currentBlockType = ev.content_block.type;
           if (currentBlockType === "tool_use" && ev.content_block.id) {
             blockIds.set(currentBlockIndex, ev.content_block.id);
             blockInputs.set(currentBlockIndex, "");
+            blockNames.set(currentBlockIndex, ev.content_block.name ?? "computer");
+          }
+          if (currentBlockType === "text") {
+            blockInputs.set(currentBlockIndex, "");
           }
         } else if (evType === "content_block_delta") {
-          const ev = event as { index: number; delta: { type: string; partial_json?: string; thinking?: string } };
+          const ev = event as { index: number; delta: { type: string; partial_json?: string; text?: string; thinking?: string } };
           if (ev.delta.type === "input_json_delta" && ev.delta.partial_json !== undefined) {
             blockInputs.set(ev.index, (blockInputs.get(ev.index) ?? "") + ev.delta.partial_json);
+          } else if (ev.delta.type === "text_delta" && ev.delta.text) {
+            blockInputs.set(ev.index, (blockInputs.get(ev.index) ?? "") + ev.delta.text);
           } else if (ev.delta.type === "thinking_delta" && ev.delta.thinking) {
             thinking = (thinking ?? "") + ev.delta.thinking;
           }
@@ -277,18 +432,45 @@ export class AnthropicAdapter implements ModelAdapter {
             const jsonStr = blockInputs.get(ev.index) ?? "{}";
             const input = JSON.parse(jsonStr) as Record<string, unknown>;
             const id = blockIds.get(ev.index) ?? `toolu_${ev.index}`;
-            const action = decoder.fromAnthropic(
-              { name: "computer", input },
-              { width: context.screenshot.width, height: context.screenshot.height },
-            );
+            const blockName = blockNames.get(ev.index) ?? "computer";
+            let action: CUAAction;
+            if (blockName === "task_complete") {
+              const result = (input.result as string) ?? "";
+              action = { type: "terminate", status: "success", result };
+            } else if (blockName === "navigate") {
+              const url = (input.url as string) ?? "";
+              action = { type: "goto", url };
+            } else if (blockName === "update_state") {
+              const data = (input.data as TaskState) ?? {};
+              action = { type: "writeState", data };
+            } else {
+              action = decoder.fromAnthropic(
+                { name: "computer", input },
+                { width: context.screenshot.width, height: context.screenshot.height },
+              );
+            }
             allActions.push(action);
             allToolCallIds.push(id);
             yield action;
+          } else if (currentBlockType === "text") {
+            const text = (blockInputs.get(currentBlockIndex) ?? "").trim();
+            if (text) finalTextAccum = text;
           }
         } else if (evType === "message_delta") {
-          const ev = event as { usage: { output_tokens: number } };
+          const ev = event as { usage: { output_tokens: number }; delta?: { stop_reason?: string } };
           outputTokens = ev.usage.output_tokens;
+          // Detect end_turn with no tool calls → model is done, treat as success termination
+          if (ev.delta?.stop_reason === "end_turn" && allActions.length === 0 && finalTextAccum) {
+            pendingTerminate = { type: "terminate", status: "success", result: finalTextAccum };
+          }
         }
+      }
+
+      // Emit terminate after the stream loop if end_turn was detected
+      if (pendingTerminate) {
+        allActions.push(pendingTerminate);
+        allToolCallIds.push("text_end_turn");
+        yield pendingTerminate;
       }
     } finally {
       // Always cache the accumulated response so PerceptionLoop can call appendResponse()

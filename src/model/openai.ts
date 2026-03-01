@@ -11,8 +11,8 @@ function buildSystemPrompt(context: StepContext): string {
   if (context.systemPrompt) parts.push(context.systemPrompt);
   parts.push(`You are a computer use agent. Current URL: ${context.url || "(unknown)"}`);
   parts.push(`Step ${context.stepIndex + 1} of ${context.maxSteps}`);
-  if (context.factStore.length > 0) {
-    parts.push("Memory:\n" + context.factStore.map((f) => `- ${f}`).join("\n"));
+  if (context.agentState && Object.keys(context.agentState).length > 0) {
+    parts.push(`Current state: ${JSON.stringify(context.agentState)}`);
   }
   return parts.join("\n\n");
 }
@@ -107,7 +107,7 @@ export class OpenAIAdapter implements ModelAdapter {
     return context.wireHistory.length * 200 + 1500;
   }
 
-  async summarize(wireHistory: WireMessage[], currentState: TaskState | null): Promise<string> {
+  async summarize(wireHistory: WireMessage[], currentState: Record<string, unknown> | null): Promise<string> {
     const response = await this.client.responses.create({
       model: "gpt-4o-mini",
       input: [{

@@ -1,4 +1,5 @@
 import type { CUAAction, TaskState, ViewportSize } from "../types.js";
+// TaskState used for writeState decoding
 import { normalize } from "./adapter.js";
 
 export class ActionDecoder {
@@ -79,6 +80,7 @@ export class ActionDecoder {
   fromGoogle(call: { name: string; args: Record<string, unknown> }): CUAAction {
     const { name, args } = call;
 
+    // Legacy computer_use tool (older Google models)
     if (name === "computer_use") {
       const action = args.action as string;
 
@@ -125,6 +127,63 @@ export class ActionDecoder {
       if (action === "key") return { type: "keyPress", keys: [args.key as string] };
       if (action === "navigate") return { type: "goto", url: args.url as string };
       if (action === "terminate") return { type: "terminate", status: (args.status as "success" | "failure") ?? "success", result: (args.result as string) ?? "" };
+    }
+
+    // Native function call names from gemini-2.5-computer-use-preview models
+    if (name === "click_at") {
+      return {
+        type: "click",
+        x: args.x as number,
+        y: args.y as number,
+        button: (args.button as "left" | "right" | "middle") ?? "left",
+      };
+    }
+    if (name === "type_text_at") {
+      return { type: "type", text: args.text as string };
+    }
+    if (name === "navigate" || name === "go_to_url") {
+      return { type: "goto", url: args.url as string };
+    }
+    if (name === "search") {
+      // Treat as a navigate to Google search if a query is provided
+      const query = (args.query as string) ?? (args.text as string) ?? "";
+      const url = query
+        ? `https://www.google.com/search?q=${encodeURIComponent(query)}`
+        : "https://www.google.com";
+      return { type: "goto", url };
+    }
+    if (name === "scroll_at" || name === "scroll") {
+      return {
+        type: "scroll",
+        x: (args.x as number) ?? 500,
+        y: (args.y as number) ?? 500,
+        direction: (args.direction as "up" | "down" | "left" | "right") ?? "down",
+        amount: (args.amount as number) ?? 3,
+      };
+    }
+    if (name === "key_press" || name === "press_key") {
+      const key = (args.key as string) ?? (args.keys as string) ?? "Return";
+      return { type: "keyPress", keys: [key] };
+    }
+    if (name === "wait" || name === "wait_5_seconds" || name === "wait_for_page_load") {
+      const ms = name === "wait_5_seconds" ? 5000 : ((args.ms as number) ?? (args.seconds as number ? (args.seconds as number) * 1000 : 2000));
+      return { type: "wait", ms };
+    }
+    if (name === "back" || name === "go_back") {
+      return { type: "keyPress", keys: ["Alt+ArrowLeft"] };
+    }
+    if (name === "forward" || name === "go_forward") {
+      return { type: "keyPress", keys: ["Alt+ArrowRight"] };
+    }
+    if (name === "terminate" || name === "done" || name === "finish") {
+      return {
+        type: "terminate",
+        status: (args.status as "success" | "failure") ?? "success",
+        result: (args.result as string) ?? (args.answer as string) ?? "",
+      };
+    }
+    if (name === "open_web_browser") {
+      return { type: "screenshot" }; // noop — browser already open
     }
 
     return { type: "screenshot" };
@@ -196,10 +255,8 @@ export class ActionDecoder {
         return { type: "scroll", x: input.x as number, y: input.y as number, direction: (input.direction as "up" | "down" | "left" | "right") ?? "down", amount: (input.amount as number) ?? 3 };
       case "goto":
         return { type: "goto", url: input.url as string };
-      case "memorize":
-        return { type: "memorize", fact: input.fact as string };
       case "writeState":
-        return { type: "writeState", state: input.state as TaskState };
+        return { type: "writeState", data: input.data as TaskState };
       case "terminate":
         return { type: "terminate", status: (input.status as "success" | "failure") ?? "success", result: (input.result as string) ?? "" };
       case "wait":

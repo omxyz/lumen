@@ -66,11 +66,8 @@ export class StreamingMonitor implements LoopMonitor {
     this.enqueue({ type: "action", step, action });
     this.enqueue({ type: "action_result", step, action, ok: outcome.ok, error: outcome.error });
 
-    if (action.type === "memorize") {
-      this.enqueue({ type: "memorized", step, fact: action.fact });
-    }
     if (action.type === "writeState") {
-      this.enqueue({ type: "state_written", step, state: action.state });
+      this.enqueue({ type: "state_written", step, data: action.data });
     }
   }
 

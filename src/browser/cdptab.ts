@@ -1,6 +1,7 @@
 import type { CDPSessionLike } from "./cdp.js";
 import type { BrowserTab, ClickOptions, DragOptions, TypeOptions } from "./tab.js";
 import type { ActionOutcome, ScreenshotOptions, ScreenshotResult, ViewportSize } from "../types.js";
+import { LumenLogger } from "../logger.js";
 
 // CDP response shapes
 interface ScreenshotResponse { data: string }
@@ -33,19 +34,50 @@ export class CDPTab implements BrowserTab {
   // sequence (Ctrl+L → type URL → Enter) and convert it to a real tab.goto() call.
   private urlBar: { active: boolean; buffer: string } = { active: false, buffer: "" };
 
-  constructor(private readonly session: CDPSessionLike) {
+  constructor(
+    private session: CDPSessionLike,
+    private readonly log: LumenLogger = LumenLogger.NOOP,
+  ) {
+    this._registerSessionListeners(session);
+  }
+
+  private _registerSessionListeners(session: CDPSessionLike): void {
     // Track navigation events
     session.on("Page.navigatedWithinDocument", (params) => {
       const p = params as { url: string };
       this.currentUrl = p.url;
+      this.log.browser(`navigatedWithinDocument: ${p.url}`);
     });
     session.on("Page.frameNavigated", (params) => {
       const p = params as { frame: { url: string; parentId?: string } };
-      if (!p.frame.parentId) this.currentUrl = p.frame.url;
+      if (!p.frame.parentId) {
+        this.currentUrl = p.frame.url;
+        this.log.browser(`frameNavigated: ${p.frame.url}`);
+      }
     });
 
     // Enable Page events
-    this.session.send("Page.enable").catch(() => {});
+    session.send("Page.enable").catch(() => {});
+  }
+
+  /** Swap in a new CDP session after a browsing-context replacement (e.g. COOP navigation).
+   *  The CDPTab object identity stays the same so Session/PerceptionLoop don't need updating. */
+  async reconnect(newSession: CDPSessionLike): Promise<void> {
+    this.session = newSession;
+    this.currentUrl = "about:blank";
+    this.urlBar = { active: false, buffer: "" };
+    this.lastClickPx = null;
+    this._registerSessionListeners(newSession);
+    this.log.browser(`CDPTab reconnected to new CDP session`);
+    // Sync actual URL from the new session (it may already be navigated)
+    await this.syncUrl();
+  }
+
+  /** Clear transient input state (URL bar buffer, last click position).
+   *  Call between independent task runs that share the same tab instance. */
+  resetInputState(): void {
+    this.urlBar = { active: false, buffer: "" };
+    this.lastClickPx = null;
   }
 
   /** Sync currentUrl with the actual page URL — call after attaching to an existing tab. */
@@ -56,7 +88,10 @@ export class CDPTab implements BrowserTab {
         returnByValue: true,
       });
       const href = result.result.value as string;
-      if (href) this.currentUrl = href;
+      if (href) {
+        this.log.browser(`syncUrl: ${href}`);
+        this.currentUrl = href;
+      }
     } catch { /* ignore — page may not be ready */ }
   }
 
@@ -67,15 +102,21 @@ export class CDPTab implements BrowserTab {
       if (format === "jpeg" && options.quality) params.quality = options.quality;
       if (options.fullPage) params.captureBeyondViewport = true;
 
-      console.log(`[cdptab] → Page.captureScreenshot`);
       const result = await this.session.send<ScreenshotResponse>("Page.captureScreenshot", params);
-      console.log(`[cdptab] ← Page.captureScreenshot ok (${result.data.length} base64 chars)`);
       let data = Buffer.from(result.data, "base64");
+      const sizeKB = (data.length / 1024).toFixed(1);
 
       // Composite cursor overlay at last click position (skipped if cursorOverlay: false or no click yet)
-      if (options.cursorOverlay !== false && this.lastClickPx) {
-        data = await this.composeCursor(data, this.lastClickPx.x, this.lastClickPx.y);
+      const hasCursor = options.cursorOverlay !== false && this.lastClickPx !== null;
+      if (hasCursor) {
+        data = await this.composeCursor(data, this.lastClickPx!.x, this.lastClickPx!.y);
       }
+
+      this.log.browser(
+        `screenshot: ${this.currentViewport.width}x${this.currentViewport.height} ${format} ${sizeKB}KB` +
+        (hasCursor ? ` cursor=(${this.lastClickPx!.x},${this.lastClickPx!.y})` : ""),
+        { width: this.currentViewport.width, height: this.currentViewport.height, format, sizeKB: parseFloat(sizeKB) },
+      );
 
       return {
         data,
@@ -84,6 +125,7 @@ export class CDPTab implements BrowserTab {
         mimeType: format === "jpeg" ? "image/jpeg" : "image/png",
       };
     } catch (err) {
+      this.log.browser(`screenshot FAILED: ${err}`, { error: String(err) });
       throw new Error(`Screenshot failed: ${err}`);
     }
   }
@@ -106,8 +148,9 @@ export class CDPTab implements BrowserTab {
   }
 
   async click(x: number, y: number, options: ClickOptions = {}): Promise<ActionOutcome> {
+    const button = options.button ?? "left";
+    this.log.browser(`click: px(${x},${y}) btn=${button}`);
     try {
-      const button = options.button ?? "left";
       const clickCount = options.clickCount ?? 1;
       await this.session.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button });
       await this.session.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button, clickCount });
@@ -115,11 +158,13 @@ export class CDPTab implements BrowserTab {
       this.lastClickPx = { x, y };
       return { ok: true };
     } catch (err) {
+      this.log.browser(`click FAILED: ${err}`, { x, y, error: String(err) });
       return { ok: false, error: String(err) };
     }
   }
 
   async doubleClick(x: number, y: number): Promise<ActionOutcome> {
+    this.log.browser(`doubleClick: px(${x},${y})`);
     try {
       await this.session.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
       await this.session.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 2 });
@@ -127,50 +172,24 @@ export class CDPTab implements BrowserTab {
       this.lastClickPx = { x, y };
       return { ok: true };
     } catch (err) {
-      return { ok: false, error: String(err) };
-    }
-  }
-
-  async rightClick(x: number, y: number): Promise<ActionOutcome> {
-    try {
-      await this.session.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
-      await this.session.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "right", clickCount: 1 });
-      await this.session.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "right", clickCount: 1 });
-      this.lastClickPx = { x, y };
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: String(err) };
-    }
-  }
-
-  async mouseDown(x: number, y: number): Promise<ActionOutcome> {
-    try {
-      await this.session.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left" });
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: String(err) };
-    }
-  }
-
-  async mouseUp(x: number, y: number): Promise<ActionOutcome> {
-    try {
-      await this.session.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left" });
-      return { ok: true };
-    } catch (err) {
+      this.log.browser(`doubleClick FAILED: ${err}`, { x, y, error: String(err) });
       return { ok: false, error: String(err) };
     }
   }
 
   async hover(x: number, y: number): Promise<ActionOutcome> {
+    this.log.browser(`hover: px(${x},${y})`);
     try {
       await this.session.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
       return { ok: true };
     } catch (err) {
+      this.log.browser(`hover FAILED: ${err}`, { x, y, error: String(err) });
       return { ok: false, error: String(err) };
     }
   }
 
   async drag(fromX: number, fromY: number, toX: number, toY: number, options: DragOptions = {}): Promise<ActionOutcome> {
+    this.log.browser(`drag: px(${fromX},${fromY}) → px(${toX},${toY})`);
     try {
       const steps = options.steps ?? 10;
       await this.session.send("Input.dispatchMouseEvent", { type: "mousePressed", x: fromX, y: fromY, button: "left" });
@@ -182,16 +201,19 @@ export class CDPTab implements BrowserTab {
       await this.session.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: toX, y: toY, button: "left" });
       return { ok: true };
     } catch (err) {
+      this.log.browser(`drag FAILED: ${err}`, { fromX, fromY, toX, toY, error: String(err) });
       return { ok: false, error: String(err) };
     }
   }
 
   async scroll(x: number, y: number, deltaX: number, deltaY: number): Promise<ActionOutcome> {
+    this.log.browser(`scroll: px(${x},${y}) delta=(${deltaX},${deltaY})`);
     try {
       await this.session.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
       await this.session.send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX, deltaY });
       return { ok: true };
     } catch (err) {
+      this.log.browser(`scroll FAILED: ${err}`, { x, y, deltaX, deltaY, error: String(err) });
       return { ok: false, error: String(err) };
     }
   }
@@ -205,26 +227,24 @@ export class CDPTab implements BrowserTab {
         const newlineIdx = text.search(/[\r\n]/);
         const hasNewline = newlineIdx !== -1;
         this.urlBar.buffer += hasNewline ? text.slice(0, newlineIdx) : text;
-        console.log(`[cdptab] urlBar: buffered "${text.slice(0, 40)}" → buffer="${this.urlBar.buffer}"`);
+        this.log.browser(`urlBar: buffered "${text.slice(0, 40)}" → buffer="${this.urlBar.buffer.slice(0, 80)}"`);
         if (hasNewline) {
-          // Treat embedded newline as Enter — navigate immediately
           const url = this.urlBar.buffer.trim();
-          console.log(`[cdptab] urlBar: implicit Enter (newline in type), buffer="${url}"`);
+          this.log.browser(`urlBar: implicit Enter (newline in type) → "${url}"`);
           this.urlBar = { active: false, buffer: "" };
-          await this.removeUrlBarOverlay();
           if (url) {
             const fullUrl = /^https?:\/\//i.test(url) ? url : `https://${url}`;
             await this.goto(fullUrl);
-            // Don't waitForLoad here — the model's API round-trip gives pages time to settle
           }
-        } else {
-          await this.renderUrlBarOverlay(this.urlBar.buffer);
         }
         return { ok: true };
       }
+      const preview = text.slice(0, 40);
+      this.log.browser(`type: "${preview}${text.length > 40 ? "..." : ""}" (${text.length} chars)`);
       await this.session.send("Input.insertText", { text });
       return { ok: true };
     } catch (err) {
+      this.log.browser(`type FAILED: ${err}`, { error: String(err) });
       return { ok: false, error: String(err) };
     }
   }
@@ -243,34 +263,33 @@ export class CDPTab implements BrowserTab {
       const hasL    = lowers.some((k) => k === "l");
       const hasF6   = lowers.some((k) => k === "f6");
       if ((hasCtrl && hasL) || hasF6) {
-        console.log(`[cdptab] urlBar: activated (${keys.join("+")})`);
+        this.log.browser(`urlBar: activated (${keys.join("+")})`);
         this.urlBar = { active: true, buffer: "" };
-        await this.renderUrlBarOverlay("");
         return { ok: true };
       }
 
       // Escape → cancel URL bar mode
       if (lowers.some((k) => k === "escape" || k === "esc")) {
-        console.log(`[cdptab] urlBar: cancelled`);
+        if (this.urlBar.active) this.log.browser(`urlBar: cancelled`);
         this.urlBar = { active: false, buffer: "" };
-        await this.removeUrlBarOverlay();
       }
 
       // Enter/Return while in URL bar mode → navigate to the typed URL
       if (this.urlBar.active && lowers.some((k) => k === "return" || k === "enter")) {
         const url = this.urlBar.buffer.trim();
-        console.log(`[cdptab] urlBar: Enter pressed, buffer="${url}"`);
+        this.log.browser(`urlBar: Enter → "${url}"`);
         this.urlBar = { active: false, buffer: "" };
-        await this.removeUrlBarOverlay();
         if (url) {
-          // Ensure URL has a scheme
           const fullUrl = /^https?:\/\//i.test(url) ? url : `https://${url}`;
           await this.goto(fullUrl);
-          // Don't waitForLoad here — the model's API round-trip gives pages time to settle
         }
         return { ok: true };
       }
       // ─────────────────────────────────────────────────────────────────────
+
+      if (!this.urlBar.active) {
+        this.log.browser(`keyPress: [${keys.join(", ")}]`);
+      }
 
       // Separate modifiers from regular keys
       const modKeys = keys.filter((k) => modifierFlag(k) > 0);
@@ -291,41 +310,22 @@ export class CDPTab implements BrowserTab {
 
       return { ok: true };
     } catch (err) {
+      this.log.browser(`keyPress FAILED: ${err}`, { keys: Array.isArray(key) ? key : [key], error: String(err) });
       return { ok: false, error: String(err) };
     }
   }
 
-  /** Render (or update) a visible fake address bar so the model gets visual feedback. */
-  private async renderUrlBarOverlay(buffer: string): Promise<void> {
-    const display = buffer === "" ? "Address bar open — type a URL and press Enter" : buffer;
-    const js = `(function(){
-      let el = document.getElementById('__cua_urlbar__');
-      if (!el) {
-        el = document.createElement('div');
-        el.id = '__cua_urlbar__';
-        Object.assign(el.style, {
-          position:'fixed', top:'0', left:'0', right:'0', zIndex:'2147483647',
-          background:'#1a73e8', color:'#fff', fontFamily:'monospace', fontSize:'15px',
-          padding:'10px 16px', boxShadow:'0 2px 6px rgba(0,0,0,0.4)'
-        });
-        (document.body || document.documentElement).appendChild(el);
-      }
-      el.textContent = '\uD83D\uDD0D ' + ${JSON.stringify(display)};
-    })()`;
-    await this.session.send("Runtime.evaluate", { expression: js }).catch(() => {});
-  }
-
-  private async removeUrlBarOverlay(): Promise<void> {
-    await this.session.send("Runtime.evaluate", {
-      expression: `document.getElementById('__cua_urlbar__')?.remove()`,
-    }).catch(() => {});
-  }
-
   async goto(url: string): Promise<void> {
-    console.log(`[cdptab] → Page.navigate url=${url}`);
+    // Programmatic navigation supersedes any in-progress URL bar input
+    if (this.urlBar.active) {
+      this.urlBar = { active: false, buffer: "" };
+    }
+    this.log.browser(`goto: ${url}`);
     const result = await this.session.send<NavigateResponse>("Page.navigate", { url });
-    console.log(`[cdptab] ← Page.navigate frameId=${result.frameId} error=${result.errorText ?? "none"}`);
-    if (result.errorText) throw new Error(`Navigation failed: ${result.errorText}`);
+    if (result.errorText) {
+      this.log.browser(`goto FAILED: ${result.errorText}`, { url, error: result.errorText });
+      throw new Error(`Navigation failed: ${result.errorText}`);
+    }
     this.currentUrl = url;
     await this.waitForLoad(8000); // wait for networkIdle before returning
   }
@@ -334,27 +334,34 @@ export class CDPTab implements BrowserTab {
     // Enable lifecycle events so networkIdle fires (no-op if already enabled)
     await this.session.send("Page.setLifecycleEventsEnabled", { enabled: true }).catch(() => {});
 
+    const t0 = Date.now();
     return new Promise<void>((resolve) => {
       let resolved = false;
-      const done = () => {
+      const done = (reason: string) => {
         if (resolved) return;
         resolved = true;
         clearTimeout(timer);
         this.session.off("Page.lifecycleEvent", lifecycleHandler);
         this.session.off("Page.loadEventFired", loadHandler);
+        const elapsed = Date.now() - t0;
+        if (reason === "timeout") {
+          this.log.browser(`waitForLoad: timed out after ${elapsed}ms`);
+        } else {
+          this.log.browser(`waitForLoad: ${reason} after ${elapsed}ms`, { reason, elapsed });
+        }
         resolve();
       };
 
       // Resolve on networkIdle (no pending network requests for 500ms) — works on SPAs
       const lifecycleHandler = (params: unknown) => {
         const p = params as { name: string };
-        if (p.name === "networkIdle") done();
+        if (p.name === "networkIdle") done("networkIdle");
       };
 
       // Also resolve on plain load event as fallback
-      const loadHandler = () => done();
+      const loadHandler = () => done("loadEventFired");
 
-      const timer = setTimeout(done, timeoutMs);
+      const timer = setTimeout(() => done("timeout"), timeoutMs);
       this.session.on("Page.lifecycleEvent", lifecycleHandler);
       this.session.on("Page.loadEventFired", loadHandler);
     });
@@ -369,7 +376,7 @@ export class CDPTab implements BrowserTab {
   }
 
   async setViewport(size: ViewportSize): Promise<void> {
-    console.log(`[cdptab] → Emulation.setDeviceMetricsOverride ${size.width}×${size.height}`);
+    this.log.browser(`setViewport: ${size.width}x${size.height}`);
     await this.session.send("Emulation.setDeviceMetricsOverride", {
       width: size.width,
       height: size.height,

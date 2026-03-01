@@ -4,7 +4,8 @@ import type { CompletionGate } from "./loop/gate.js";
 import type { LoopMonitor } from "./loop/monitor.js";
 import type { RouterTiming } from "./loop/router.js";
 import type { SessionPolicyOptions } from "./loop/policy.js";
-import { CUASession } from "./session.js";
+import { Session } from "./session.js";
+import { LumenLogger } from "./logger.js";
 import type {
   AgentEvent,
   AgentOptions,
@@ -51,38 +52,74 @@ async function createAdapter(
   return new CustomAdapter(model, { baseURL, apiKey });
 }
 
-async function connectBrowser(opts: BrowserOptions): Promise<{ tab: BrowserTab; cleanup: () => Promise<void> }> {
+/** Resolve a page-level CDP session from a browser-level connection.
+ *  Browser-level sessions (/devtools/browser/) don't support Page.* or Emulation.* —
+ *  we must attach to the first page target to get a usable session. */
+async function resolvePageSession(conn: import("./browser/cdp.js").CdpConnection, log: LumenLogger) {
+  interface TargetInfo { targetId: string; type: string; url: string }
+  try {
+    const { targetInfos } = await conn.mainSession().send<{ targetInfos: TargetInfo[] }>("Target.getTargets", {});
+    const pageTarget = targetInfos.find((t) => t.type === "page");
+    if (pageTarget) {
+      log.browser(`attaching to page target: ${pageTarget.targetId} (${pageTarget.url})`);
+      return await conn.newSession(pageTarget.targetId);
+    }
+  } catch {
+    // Already a page-level connection — mainSession is usable directly
+  }
+  return conn.mainSession();
+}
+
+type BrowserConnectResult = {
+  tab: BrowserTab;
+  cleanup: () => Promise<void>;
+  conn?: import("./browser/cdp.js").CdpConnection;
+};
+
+async function connectBrowser(
+  opts: BrowserOptions,
+  log: LumenLogger,
+): Promise<BrowserConnectResult> {
   const { CdpConnection } = await import("./browser/cdp.js");
   const { CDPTab } = await import("./browser/cdptab.js");
 
   if (opts.type === "local") {
     const { launchChrome } = await import("./browser/launch/local.js");
+    log.browser(`launching local Chrome${opts.headless !== false ? " (headless)" : " (headed)"}`);
     const { wsUrl, kill } = await launchChrome({
       port: opts.port,
       headless: opts.headless,
       userDataDir: opts.userDataDir,
     });
-    const conn = await CdpConnection.connect(wsUrl);
-    const tab = new CDPTab(conn.mainSession());
-    return { tab, cleanup: async () => { conn.close(); kill(); } };
+    log.browser(`Chrome launched, connecting CDP: ${wsUrl}`);
+    const conn = await CdpConnection.connect(wsUrl, log);
+    const session = await resolvePageSession(conn, log);
+    const tab = new CDPTab(session, log);
+    return { tab, cleanup: async () => { conn.close(); kill(); }, conn };
   }
 
   if (opts.type === "cdp") {
-    const conn = await CdpConnection.connect(opts.url);
-    const tab = new CDPTab(conn.mainSession());
-    return { tab, cleanup: async () => { conn.close(); } };
+    log.browser(`connecting to CDP endpoint: ${opts.url}`);
+    const conn = await CdpConnection.connect(opts.url, log);
+    const session = await resolvePageSession(conn, log);
+    const tab = new CDPTab(session, log);
+    return { tab, cleanup: async () => { conn.close(); }, conn };
   }
 
   if (opts.type === "browserbase") {
+    log.browser(`connecting to Browserbase (project=${opts.projectId}${opts.sessionId ? ` session=${opts.sessionId}` : ""})`);
     const { connectBrowserbase } = await import("./browser/launch/browserbase.js");
-    const { wsUrl } = await connectBrowserbase(opts);
-    const conn = await CdpConnection.connect(wsUrl);
-    const tab = new CDPTab(conn.mainSession());
+    const { wsUrl, sessionId } = await connectBrowserbase(opts);
+    log.browser(`Browserbase session ready (id=${sessionId}), connecting CDP`);
+    const conn = await CdpConnection.connect(wsUrl, log);
+    const session = await resolvePageSession(conn, log);
+    const tab = new CDPTab(session, log);
     return { tab, cleanup: async () => { conn.close(); } };
   }
 
   throw new Error(`Unknown browser type: ${(opts as { type: string }).type}`);
 }
+
 
 /** Build a LoopMonitor that respects verbose level and optional logger callback. */
 async function buildMonitor(opts: AgentOptions): Promise<import("./loop/monitor.js").LoopMonitor> {
@@ -150,8 +187,10 @@ export class Agent {
   private _tab: BrowserTab | null = null;
   private _adapter: ModelAdapter | null = null;
   private _cleanup: (() => Promise<void>) | null = null;
-  private _session: CUASession | null = null;
+  private _conn: import("./browser/cdp.js").CdpConnection | null = null;
+  private _session: Session | null = null;
   private _pendingHistory: SerializedAgent | null = null;
+  private _log: LumenLogger | null = null;
 
   constructor(options: AgentOptions) {
     this.options = options;
@@ -165,30 +204,52 @@ export class Agent {
   private async _connect(): Promise<void> {
     if (this._tab) return;
 
-    const [adapter, { tab, cleanup }, monitor, compactionAdapter] = await Promise.all([
+    // Create the logger first — it is threaded into every layer below
+    const log = new LumenLogger(this.options.verbose ?? 1, this.options.logger);
+    this._log = log;
+
+    log.info(`[lumen] connecting — model=${this.options.model} browser=${this.options.browser.type}`);
+
+    const [adapter, browserResult, monitor, compactionAdapter] = await Promise.all([
       createAdapter(this.options.model, this.options.apiKey, this.options.baseURL, this.options.thinkingBudget),
-      connectBrowser(this.options.browser),
+      connectBrowser(this.options.browser, log),
       buildMonitor(this.options),
       this.options.compactionModel
         ? createAdapter(this.options.compactionModel, this.options.apiKey, this.options.baseURL)
         : Promise.resolve(undefined),
     ]);
 
+    const { tab, cleanup, conn } = browserResult;
+
+    log.adapter(
+      `adapter ready | provider=${adapter.provider} model=${adapter.modelId} contextWindow=${adapter.contextWindowTokens}`,
+      { provider: adapter.provider, modelId: adapter.modelId, contextWindow: adapter.contextWindowTokens },
+    );
+
     this._adapter = adapter;
     this._tab = tab;
     this._cleanup = cleanup;
+    this._conn = conn ?? null;
 
     // Align viewport to model's patch size if requested
     if (this.options.autoAlignViewport !== false) {
-      const { ViewportManager } = await import("./browser/viewport.js");
-      const vm = new ViewportManager(tab);
-      await vm.alignToModel(adapter.patchSize, adapter.maxImageDimension);
+      try {
+        const { ViewportManager } = await import("./browser/viewport.js");
+        const vm = new ViewportManager(tab);
+        const aligned = await vm.alignToModel(adapter.patchSize, adapter.maxImageDimension);
+        log.browser(
+          `viewport aligned: ${aligned.width}x${aligned.height} (patchSize=${adapter.patchSize ?? "n/a"})`,
+          { width: aligned.width, height: aligned.height, patchSize: adapter.patchSize },
+        );
+      } catch (e) {
+        log.warn(`[lumen] viewport alignment skipped (CDP not supported): ${(e as Error).message}`);
+      }
     }
 
     // Determine initial history from pending (Agent.resume) or AgentOptions.initialHistory
     const initialHistory = this._pendingHistory ?? this.options.initialHistory;
 
-    this._session = new CUASession({
+    this._session = new Session({
       tab,
       adapter,
       systemPrompt: this.options.systemPrompt,
@@ -203,15 +264,21 @@ export class Agent {
       monitor,
       compactionAdapter,
       initialHistory,
-      initialFacts: this.options.initialFacts,
       initialState: this.options.initialState,
+      log,
     });
     this._pendingHistory = null;
-    await this._session.init();
+
+    log.info(`[lumen] connected and ready`);
   }
 
   async run(options: RunOptions): Promise<AgentResult> {
     await this._connect();
+
+    this._log?.info(
+      `[lumen] run: "${options.instruction?.slice(0, 80)}${(options.instruction?.length ?? 0) > 80 ? "..." : ""}"`,
+      { instructionLen: options.instruction?.length ?? 0, maxSteps: options.maxSteps },
+    );
 
     // Optional planner pass — generates a step plan and prepends to the session system prompt
     if (this.options.plannerModel) {
@@ -221,7 +288,7 @@ export class Agent {
       // Re-create the session with the plan-enhanced system prompt for this run
       const plannerSystemPrompt = `${plan}\n\n${this.options.systemPrompt ?? ""}`.trim();
       const monitor = await buildMonitor(this.options);
-      const sessionWithPlan = new CUASession({
+      const sessionWithPlan = new Session({
         tab: this._tab!,
         adapter: this._adapter!,
         systemPrompt: plannerSystemPrompt,
@@ -235,8 +302,37 @@ export class Agent {
         completionGate: this.options.completionGate,
         monitor,
       });
-      await sessionWithPlan.init();
       return sessionWithPlan.run(options);
+    }
+
+    if (options.startUrl) {
+      this._log?.browser(`pre-navigating to startUrl: ${options.startUrl}`);
+      try {
+        await this._tab!.goto(options.startUrl);
+      } catch (e) {
+        this._log?.warn(`[lumen] startUrl pre-navigation failed (${options.startUrl}): ${e}. Attempting CDP reconnect.`);
+        // The browsing context may have been replaced (COOP or redirect). Try to
+        // reconnect the CDPTab to the new page target without rebuilding the session.
+        if (this._conn) {
+          try {
+            await new Promise((r) => setTimeout(r, 150)); // let Chrome settle
+            const newPageSession = await resolvePageSession(this._conn, this._log!);
+            const { CDPTab } = await import("./browser/cdptab.js");
+            if (this._tab instanceof CDPTab) {
+              await this._tab.reconnect(newPageSession);
+              this._log?.browser(`[lumen] CDPTab reconnected to new page target (url=${this._tab.url()})`);
+              // Retry navigation on the fresh session
+              try {
+                await this._tab.goto(options.startUrl);
+              } catch {
+                this._log?.warn(`[lumen] retry navigation after reconnect failed. Model will navigate.`);
+              }
+            }
+          } catch (reconnectErr) {
+            this._log?.warn(`[lumen] CDP reconnect failed: ${reconnectErr}. Model will navigate.`);
+          }
+        }
+      }
     }
 
     return this._session!.run({ ...options });
@@ -258,7 +354,7 @@ export class Agent {
 
     // Re-create session with streaming monitor if already connected
     // We patch the session's monitor by creating the loop with the streaming monitor
-    const { CUASession: CUASess } = await import("./session.js");
+    const { Session: CUASess } = await import("./session.js");
     const [compactionAdapter, monitor] = await Promise.all([
       this.options.compactionModel
         ? createAdapter(this.options.compactionModel, this.options.apiKey, this.options.baseURL)
@@ -280,8 +376,17 @@ export class Agent {
       completionGate: this.options.completionGate,
       monitor,
       compactionAdapter,
+      log: this._log ?? undefined,
     });
-    await session.init();
+
+    if (options.startUrl) {
+      this._log?.browser(`pre-navigating to startUrl: ${options.startUrl}`);
+      try {
+        await this._tab!.goto(options.startUrl);
+      } catch (e) {
+        this._log?.warn(`[lumen] startUrl pre-navigation failed (${options.startUrl}): ${e}. Model will navigate.`);
+      }
+    }
 
     // Run in the background while we consume events
     const runPromise = session.run(options).then((result) => {
@@ -294,7 +399,7 @@ export class Agent {
         result: err.message,
         steps: 0,
         history: [],
-        finalState: null,
+        agentState: null,
         tokenUsage: { inputTokens: 0, outputTokens: 0 },
       });
       throw err;
@@ -347,7 +452,7 @@ export class Agent {
   static async run(options: AgentOptions & RunOptions): Promise<AgentResult> {
     const agent = new Agent(options);
     try {
-      return await agent.run({ instruction: options.instruction, maxSteps: options.maxSteps });
+      return await agent.run({ instruction: options.instruction, maxSteps: options.maxSteps, startUrl: options.startUrl });
     } finally {
       await agent.close();
     }
