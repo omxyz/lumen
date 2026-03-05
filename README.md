@@ -1,580 +1,284 @@
 # @omlabs/lumen
 
-Vision-first Computer Use Agent (CUA) engine for Node.js. Give it a task in plain English; it drives a real browser using screenshots and model-emitted actions to get it done.
-
-Lumen is a clean, production-grade redesign of the CUA path in Stagehand V3 — same vision-loop idea, engineered from scratch with principled history compression, a unified coordinate model, and a composable adapter interface for Anthropic, Google, OpenAI, and any OpenAI-compatible provider.
-
-## Table of Contents
-
-- [Key Features](#key-features)
-- [Tech Stack](#tech-stack)
-- [Prerequisites](#prerequisites)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Browser Options](#browser-options)
-- [Model Selection](#model-selection)
-- [AgentOptions Reference](#agentoptions-reference)
-- [Streaming Events](#streaming-events)
-- [Session Resumption](#session-resumption)
-- [Policy & Safety](#policy--safety)
-- [Testing](#testing)
-- [Benchmarks](#benchmarks)
-- [Scripts](#scripts)
-- [Architecture](#architecture)
-- [Troubleshooting](#troubleshooting)
-
----
-
-## Key Features
-
-- **Vision-only loop** — screenshot → model → action(s) → screenshot. No DOM scraping, no selectors.
-- **Multi-provider** — Anthropic (Claude), Google (Gemini), OpenAI (`computer-use-preview`), and any OpenAI-compatible chat endpoint.
-- **Principled history compression** — tier-1 screenshot compression (keeps the last N frames) + tier-2 LLM summarization at 80% context utilization. Achieves 32% fewer tokens than Stagehand V3 in benchmarks.
-- **Unified coordinate model** — each model provider emits coordinates in its own format (Anthropic/OpenAI pixels, Google 0–1000). `ActionDecoder` converts all coordinates to viewport pixels at decode time. `ActionRouter` dispatches pixel coords directly to the browser.
-- **Persistent within-session memory** — the `writeState` action persists structured JSON that survives history compaction via `StateStore`.
-- **Streaming events** — `agent.stream()` yields a typed `StreamEvent` async iterable for real-time UI.
-- **Session resumption** — serialize to JSON, restore later with `Agent.resume()`.
-- **Safety hooks** — `SessionPolicy` (domain allowlist/blocklist, action-type filter) and a `PreActionHook` for imperative deny logic.
-- **Completion verification** — plug in a `Verifier` to verify the task is actually done before the loop exits.
-- **Repeat detection** — three-layer detection (exact action, action category, URL stall) with escalating nudges that help the model self-correct when stuck.
-- **Action caching** — optional on-disk action cache for replaying known-good actions on repeated runs.
-- **Granular debug logging** — `LumenLogger` with per-surface env vars (`LUMEN_LOG_CDP`, `LUMEN_LOG_ACTIONS`, etc.) for surgical debugging.
-- **Form state extraction** — after form-related actions, Lumen extracts visible input values via CDP and feeds them back to the model.
-- **Child loop delegation** — the model can delegate a sub-task to a fresh loop via the `delegate` action.
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Language | TypeScript 5.7+ (ESM-only) |
-| Runtime | Node.js ≥ 20.19 |
-| Browser | Chrome/Chromium via CDP WebSocket |
-| Browser launch | `chrome-launcher` (local) or Browserbase (cloud) |
-| Image processing | `sharp` (JPEG compression, cursor overlay) |
-| Models | `@anthropic-ai/sdk`, `@google/genai`, `openai` |
-| Tests | Vitest |
-| Build | `tsc` → `dist/` |
-
----
-
-## Prerequisites
-
-- **Node.js** ≥ 20.19.0 or ≥ 22.12.0
-- **Chrome or Chromium** installed locally (for `browser: { type: "local" }`)
-- An API key for at least one of: Anthropic, Google AI, or OpenAI
-
----
-
-## Installation
-
-```bash
-npm install @omlabs/lumen
-# or
-pnpm add @omlabs/lumen
-```
-
----
-
-## Quick Start
+Vision-first browser agent for Node.js. Give it a task in plain English; it drives a real browser using screenshots and model-emitted actions to get it done.
 
 ```typescript
 import { Agent } from "@omlabs/lumen";
 
 const result = await Agent.run({
   model: "anthropic/claude-sonnet-4-6",
-  apiKey: process.env.ANTHROPIC_API_KEY,
-  browser: { type: "local", headless: true },
+  browser: { type: "local" },
   instruction: "Go to news.ycombinator.com and tell me the title of the top story.",
-  maxSteps: 10,
 });
 
-console.log(result.status);  // "success" | "failure" | "maxSteps"
-console.log(result.result);  // natural-language answer from the model
-console.log(`Used ${result.tokenUsage.inputTokens} input tokens in ${result.steps} steps`);
+console.log(result.result);
 ```
 
-`Agent.run()` is a convenience wrapper that creates the agent, runs once, and closes the browser. For multi-run sessions use the class directly:
+## Features
+
+- **Vision-only loop** — screenshot → model → action(s) → screenshot. No DOM scraping, no selectors.
+- **Multi-provider** — Anthropic, Google, OpenAI, and any OpenAI-compatible endpoint.
+- **History compression** — tier-1 screenshot compression + tier-2 LLM summarization at 80% context utilization.
+- **Unified coordinates** — `ActionDecoder` normalizes all provider formats to viewport pixels at decode time.
+- **Persistent memory** — `writeState` persists structured JSON that survives history compaction.
+- **Streaming** — `agent.stream()` yields typed `StreamEvent` objects for real-time UI.
+- **Session resumption** — serialize to JSON, restore later with `Agent.resume()`.
+- **Safety** — `SessionPolicy` (domain allowlist/blocklist), `PreActionHook` (imperative deny), `Verifier` (completion gate).
+- **Repeat detection** — three-layer stuck detection with escalating nudges.
+- **Action caching** — on-disk cache for replaying known-good actions.
+- **Child delegation** — the model can hand off sub-tasks to a fresh loop via `delegate`.
+
+## Install
+
+```bash
+npm install @omlabs/lumen
+```
+
+Requires Node.js ≥ 20.19 and Chrome/Chromium for local browser mode.
+
+## Usage
+
+### One-shot
 
 ```typescript
-import { Agent } from "@omlabs/lumen";
+const result = await Agent.run({
+  model: "anthropic/claude-sonnet-4-6",
+  browser: { type: "local", headless: true },
+  instruction: "Find the price of the top result for 'mechanical keyboard' on Amazon.",
+  maxSteps: 15,
+});
+```
 
+### Multi-run session
+
+```typescript
 const agent = new Agent({
   model: "anthropic/claude-sonnet-4-6",
-  apiKey: process.env.ANTHROPIC_API_KEY,
   browser: { type: "local" },
 });
 
-// First task
-const r1 = await agent.run({ instruction: "Navigate to github.com" });
-
-// Second task — same browser session, history preserved
-const r2 = await agent.run({ instruction: "Search for the 'react' repository." });
-
+await agent.run({ instruction: "Navigate to github.com" });
+await agent.run({ instruction: "Search for the 'react' repository." });
 await agent.close();
 ```
 
----
-
-## Browser Options
-
-### Local Chrome (default for development)
-
-Launches a Chrome process via `chrome-launcher`. Requires Chrome/Chromium to be installed.
+### Streaming
 
 ```typescript
-browser: {
-  type: "local",
-  headless: true,         // default: true
-  port: 9222,             // CDP port, default: 9222
-  userDataDir: "/tmp/lumen-profile",  // optional profile directory
-}
-```
-
-### Existing CDP endpoint
-
-Connect to an already-running Chrome instance (useful when you own the browser lifecycle).
-
-```typescript
-browser: {
-  type: "cdp",
-  url: "ws://localhost:9222/devtools/browser/...",
-}
-```
-
-Obtain the WebSocket URL from `http://localhost:<port>/json/version`.
-
-### Browserbase (cloud)
-
-Remote browser hosted by [Browserbase](https://browserbase.com). No local Chrome needed; works in serverless environments.
-
-```typescript
-browser: {
-  type: "browserbase",
-  apiKey: process.env.BROWSERBASE_API_KEY!,
-  projectId: process.env.BROWSERBASE_PROJECT_ID!,
-  // sessionId: "existing-session-id",  // optional: resume a session
-}
-```
-
----
-
-## Model Selection
-
-Pass the model as `"provider/model-id"` or use the short Stagehand-compatible names.
-
-### Anthropic
-
-```typescript
-model: "anthropic/claude-opus-4-6"    // most capable
-model: "anthropic/claude-sonnet-4-6"  // balanced (recommended)
-model: "anthropic/claude-3-7-sonnet-20250219"
-```
-
-Anthropic models use the native `computer_20251124` tool (Claude 4.x) or `computer_20250124` (older models). Extended thinking is supported:
-
-```typescript
-{ model: "anthropic/claude-opus-4-6", thinkingBudget: 8000 }
-```
-
-### Google
-
-```typescript
-model: "google/gemini-2.5-pro"
-model: "google/gemini-2.0-flash"
-```
-
-### OpenAI
-
-```typescript
-model: "openai/computer-use-preview"
-```
-
-### Custom / OpenAI-compatible
-
-Any model not matching the above prefixes falls through to `CustomAdapter`, which speaks OpenAI-compatible chat completions:
-
-```typescript
-{
-  model: "my-local-model",
-  baseURL: "http://localhost:11434/v1",
-  apiKey: "ollama",
-}
-```
-
----
-
-## AgentOptions Reference
-
-```typescript
-interface AgentOptions {
-  // Required
-  model: string;                     // "anthropic/claude-sonnet-4-6" etc.
-  browser: BrowserOptions;
-
-  // Auth
-  apiKey?: string;                   // Falls back to env var (ANTHROPIC_API_KEY etc.)
-  baseURL?: string;                  // For CustomAdapter
-
-  // Task control
-  maxSteps?: number;                 // Default: 30
-  systemPrompt?: string;             // Prepended to every request
-  plannerModel?: string;             // If set, runs a planning pass before the loop
-
-  // Anthropic extended thinking
-  thinkingBudget?: number;           // Token budget. Default: 0 (disabled)
-
-  // History & compression
-  compactionThreshold?: number;      // 0–1. Compact at this token utilization. Default: 0.8
-  compactionModel?: string;          // Override model for summarization. Default: main model
-  keepRecentScreenshots?: number;    // Screenshots to keep in wire history. Default: 2
-
-  // Viewport
-  autoAlignViewport?: boolean;       // Snap viewport to model patch size. Default: true
-  cursorOverlay?: boolean;           // Draw cursor dot at last click. Default: true
-
-  // Observability
-  verbose?: 0 | 1 | 2;              // 0=silent, 1=step-level, 2=action-level. Default: 1
-  logger?: (line: LogLine) => void;  // Structured log callback
-  monitor?: LoopMonitor;             // Custom monitor (overrides verbose)
-
-  // Safety
-  policy?: SessionPolicyOptions;
-  preActionHook?: PreActionHook;
-  verifier?: Verifier;
-
-  // Timing overrides (milliseconds)
-  timing?: {
-    afterClick?: number;       // Default: 200
-    afterType?: number;        // Default: 500
-    afterScroll?: number;      // Default: 300
-    afterNavigation?: number;  // Default: 1000
-  };
-
-  // Action cache
-  cacheDir?: string;              // Directory for action cache. Default: disabled
-
-  // Session resumption
-  initialHistory?: SerializedHistory;
-  initialState?: TaskState;
-}
-```
-
-### RunOptions
-
-```typescript
-interface RunOptions {
-  instruction: string;
-  maxSteps?: number;                   // Override AgentOptions.maxSteps for this run
-  startUrl?: string;                   // Navigate here before first model step. Saves 1-2 steps.
-}
-```
-
----
-
-## Streaming Events
-
-`agent.stream()` returns an async iterable of `StreamEvent` objects, useful for building real-time UIs or progress indicators.
-
-```typescript
-const agent = new Agent({ model: "anthropic/claude-sonnet-4-6", browser: { type: "local" } });
-
 for await (const event of agent.stream({ instruction: "Find the current Bitcoin price." })) {
   switch (event.type) {
     case "step_start":
       console.log(`Step ${event.step}/${event.maxSteps} — ${event.url}`);
       break;
-    case "screenshot":
-      // event.imageBase64 — render in UI
-      break;
-    case "thinking":
-      console.log("Thinking:", event.text);
-      break;
     case "action":
-      console.log("Executing:", event.action.type);
-      break;
-    case "action_result":
-      if (!event.ok) console.warn("Action failed:", event.error);
-      break;
-    case "compaction":
-      console.log(`Compacted: ${event.tokensBefore} → ${event.tokensAfter} tokens`);
+      console.log(`  ${event.action.type}`);
       break;
     case "done":
-      console.log("Done:", event.result.status, event.result.result);
+      console.log(event.result.result);
       break;
   }
 }
-
-await agent.close();
 ```
 
-### Full event reference
+### Pre-navigate with startUrl
 
-| Event type | Key fields |
+Save 1-2 model steps by going to the target page before the first screenshot:
+
+```typescript
+await Agent.run({
+  model: "anthropic/claude-sonnet-4-6",
+  browser: { type: "local" },
+  instruction: "Find the cheapest flight from JFK to LAX next Friday.",
+  startUrl: "https://www.google.com/travel/flights",
+});
+```
+
+## Models
+
+Pass `"provider/model-id"`:
+
+```typescript
+model: "anthropic/claude-sonnet-4-6"     // recommended
+model: "anthropic/claude-opus-4-6"       // most capable
+model: "google/gemini-2.5-pro"
+model: "openai/computer-use-preview"
+```
+
+Any unrecognized prefix falls through to `CustomAdapter` (OpenAI-compatible chat completions):
+
+```typescript
+{ model: "llama3.2-vision", baseURL: "http://localhost:11434/v1", apiKey: "ollama" }
+```
+
+Extended thinking (Anthropic):
+
+```typescript
+{ model: "anthropic/claude-opus-4-6", thinkingBudget: 8000 }
+```
+
+## Browser Options
+
+```typescript
+// Local Chrome (default)
+browser: { type: "local", headless: true, port: 9222 }
+
+// Existing CDP endpoint
+browser: { type: "cdp", url: "ws://localhost:9222/devtools/browser/..." }
+
+// Browserbase (cloud — no local Chrome needed)
+browser: {
+  type: "browserbase",
+  apiKey: process.env.BROWSERBASE_API_KEY!,
+  projectId: process.env.BROWSERBASE_PROJECT_ID!,
+}
+```
+
+## Safety
+
+### SessionPolicy
+
+```typescript
+policy: {
+  allowedDomains: ["*.mycompany.com"],
+  blockedDomains: ["facebook.com"],
+  allowedActions: ["click", "type", "scroll", "goto", "terminate"],
+}
+```
+
+### PreActionHook
+
+```typescript
+preActionHook: async (action) => {
+  if (action.type === "goto" && action.url.includes("checkout")) {
+    return { decision: "deny", reason: "checkout not permitted" };
+  }
+  return { decision: "allow" };
+}
+```
+
+### Verifier
+
+Verify the task is actually done before accepting `terminate`:
+
+```typescript
+import { Agent, UrlMatchesGate, ModelVerifier, AnthropicAdapter } from "@omlabs/lumen";
+
+// URL pattern match
+verifier: new UrlMatchesGate(/\/confirmation\?order=\d+/)
+
+// Model-based verification
+verifier: new ModelVerifier(
+  new AnthropicAdapter("claude-haiku-4-5-20251001"),
+  "Complete the checkout flow",
+)
+```
+
+## Session Resumption
+
+```typescript
+// Save
+const snapshot = await agent.serialize();
+fs.writeFileSync("session.json", JSON.stringify(snapshot));
+
+// Restore
+const data = JSON.parse(fs.readFileSync("session.json", "utf8"));
+const agent2 = Agent.resume(data, { model: "anthropic/claude-sonnet-4-6", browser: { type: "local" } });
+```
+
+## Options
+
+```typescript
+interface AgentOptions {
+  model: string;
+  browser: BrowserOptions;
+  apiKey?: string;
+  baseURL?: string;
+  maxSteps?: number;                 // default: 30
+  systemPrompt?: string;
+  plannerModel?: string;             // cheap model for pre-loop planning
+  thinkingBudget?: number;           // Anthropic extended thinking. default: 0
+  compactionThreshold?: number;      // 0–1. default: 0.8
+  compactionModel?: string;
+  keepRecentScreenshots?: number;    // default: 2
+  autoAlignViewport?: boolean;       // default: true
+  cursorOverlay?: boolean;           // default: true
+  verbose?: 0 | 1 | 2;              // default: 1
+  logger?: (line: LogLine) => void;
+  monitor?: LoopMonitor;
+  policy?: SessionPolicyOptions;
+  preActionHook?: PreActionHook;
+  verifier?: Verifier;
+  timing?: { afterClick?: number; afterType?: number; afterScroll?: number; afterNavigation?: number };
+  cacheDir?: string;                 // action cache directory
+  initialHistory?: SerializedHistory;
+  initialState?: TaskState;
+}
+```
+
+## Event Reference
+
+| Event | Key fields |
 |---|---|
 | `step_start` | `step`, `maxSteps`, `url` |
 | `screenshot` | `step`, `imageBase64` |
 | `thinking` | `step`, `text` |
 | `action` | `step`, `action: Action` |
-| `action_result` | `step`, `action`, `ok`, `error?` |
-| `action_blocked` | `step`, `action`, `reason` |
+| `action_result` | `step`, `ok`, `error?` |
+| `action_blocked` | `step`, `reason` |
 | `state_written` | `step`, `data: TaskState` |
 | `compaction` | `step`, `tokensBefore`, `tokensAfter` |
 | `termination_rejected` | `step`, `reason` |
 | `done` | `result: RunResult` |
 
----
+## Debug Logging
 
-## Session Resumption
-
-Serialize the agent state to JSON after a run, then restore it later in a new process.
-
-```typescript
-// Run 1 — save state
-const agent = new Agent({ model: "anthropic/claude-sonnet-4-6", browser: { type: "local" } });
-await agent.run({ instruction: "Log in to the app." });
-const snapshot = await agent.serialize();
-await agent.close();
-
-// Persist snapshot however you like
-fs.writeFileSync("session.json", JSON.stringify(snapshot));
-
-// Run 2 — restore in a new process
-const snapshot = JSON.parse(fs.readFileSync("session.json", "utf8"));
-const agent2 = Agent.resume(snapshot, {
-  model: "anthropic/claude-sonnet-4-6",
-  browser: { type: "local" },
-});
-await agent2.run({ instruction: "Now fill out the profile form." });
-await agent2.close();
+```bash
+LUMEN_LOG=debug npm start              # all surfaces
+LUMEN_LOG_ACTIONS=1 npm start          # just action dispatch
+LUMEN_LOG_CDP=1 npm start              # CDP wire traffic
+LUMEN_LOG_LOOP=1 npm start             # perception loop internals
 ```
 
-The serialized payload contains:
-- `wireHistory` — compressed model-facing message history
-- `semanticSteps` — full human-readable step records (never compressed)
-- `agentState` — last `writeState` state
-- `modelId` — model used in the original session
-
----
-
-## Policy & Safety
-
-### SessionPolicy — declarative allowlist/blocklist
-
-```typescript
-const agent = new Agent({
-  model: "anthropic/claude-sonnet-4-6",
-  browser: { type: "local" },
-  policy: {
-    allowedDomains: ["*.mycompany.com", "api.stripe.com"],
-    blockedDomains: ["facebook.com", "twitter.com"],
-    allowedActions: ["click", "type", "scroll", "goto", "terminate"],
-  },
-});
-```
-
-`allowedDomains` / `blockedDomains` support glob-style `*.domain.com` patterns. Note: this is a policy layer, not OS-level network isolation. Page-initiated redirects and embedded resources are not intercepted.
-
-### PreActionHook — imperative deny logic
-
-Called before every action, before the policy check. Return `{ decision: "deny", reason: "..." }` to block.
-
-```typescript
-const agent = new Agent({
-  model: "anthropic/claude-sonnet-4-6",
-  browser: { type: "local" },
-  preActionHook: async (action) => {
-    if (action.type === "goto" && action.url.includes("checkout")) {
-      return { decision: "deny", reason: "checkout navigation not permitted in this context" };
-    }
-    return { decision: "allow" };
-  },
-});
-```
-
-### Verifier — verify the task is actually done
-
-By default, the loop exits as soon as the model emits `terminate`. A `Verifier` lets you add your own verification:
-
-```typescript
-import { Agent, UrlMatchesGate, CustomGate } from "@omlabs/lumen";
-
-// Built-in: verify the current URL matches a pattern
-const agent = new Agent({
-  model: "anthropic/claude-sonnet-4-6",
-  browser: { type: "local" },
-  verifier: new UrlMatchesGate(/\/confirmation\?order=\d+/),
-});
-
-// Custom: inspect the screenshot
-const verifier = new CustomGate(
-  async (screenshot, url) => {
-    // your verification logic
-    return url.includes("/success");
-  },
-  "Expected to land on success page",
-);
-```
-
-```typescript
-// Model-based: use the model itself to verify completion from the screenshot
-import { Agent, ModelVerifier, AnthropicAdapter } from "@omlabs/lumen";
-
-const verifierAdapter = new AnthropicAdapter("claude-haiku-4-5-20251001", process.env.ANTHROPIC_API_KEY);
-const agent = new Agent({
-  model: "anthropic/claude-sonnet-4-6",
-  browser: { type: "local" },
-  verifier: new ModelVerifier(verifierAdapter, "Complete the checkout flow", 2),
-});
-```
-
-If the verifier fails, the termination is rejected and fed back to the model as an error, giving it a chance to recover.
-
----
+Surfaces: `LUMEN_LOG_CDP`, `LUMEN_LOG_ACTIONS`, `LUMEN_LOG_BROWSER`, `LUMEN_LOG_HISTORY`, `LUMEN_LOG_ADAPTER`, `LUMEN_LOG_LOOP`.
 
 ## Testing
 
 ```bash
-# Run the full test suite (73 tests, ~0.5s)
-npm test
-
-# Watch mode
+npm test              # 286 tests, ~3.5s
 npm run test:watch
-
-# Type checking (includes tests/)
 npm run typecheck
 ```
 
-### Test structure
-
-```
-tests/
-├── unit/
-│   ├── state.test.ts          # StateStore
-│   ├── policy.test.ts         # SessionPolicy domain matching
-│   ├── verifier.test.ts       # Verifier / VerifyResult
-│   ├── normalize.test.ts      # Coordinate helpers
-│   ├── decoder.test.ts        # ActionDecoder
-│   ├── history.test.ts        # HistoryManager compression
-│   ├── history-toolids.test.ts# Tool call ID correlation
-│   ├── router.test.ts         # ActionRouter
-│   ├── action-cache.test.ts   # ActionCache
-│   ├── repeat-detector.test.ts# RepeatDetector
-│   └── streaming-monitor.test.ts
-├── integration/
-│   ├── mock-tab.ts            # In-memory BrowserTab implementation
-│   ├── mock-adapter.ts        # In-memory ModelAdapter implementation
-│   ├── loop.test.ts           # Full PerceptionLoop integration
-│   ├── child.test.ts          # ChildLoop delegation
-│   ├── verifier.test.ts       # Verifier integration
-│   ├── policy-integration.test.ts
-│   ├── preaction-hook.test.ts
-│   ├── writestate.test.ts
-│   ├── options.test.ts
-│   ├── compaction.test.ts
-│   ├── repeat-detector.test.ts
-│   └── live-challenges.test.ts
-└── evals/ → evals/benchmark/
-```
-
----
-
-## Benchmarks
-
-Benchmarks measure real-task performance against live websites with actual model calls across multiple frameworks (Lumen vs Stagehand vs browser-use). They require API keys.
-
-```bash
-# All benchmark tasks, all frameworks
-ANTHROPIC_API_KEY=sk-... npm run benchmark
-
-# Lumen only
-npm run benchmark:lumen
-
-# Stagehand only
-npm run benchmark:stagehand
-
-# browser-use only
-npm run benchmark:browser-use
-```
-
-Eval results (claude-sonnet-4-6, March 2026):
-
-| Task | Steps | Token reduction |
-|---|---|---|
-| wikipedia_shannon | 4 | 5.6% |
-| github_react_version | 3 | ~0% |
-| hacker_news_top | 1 | 0% |
-| allrecipes_wellington | 14 | 39.7% |
-| **Aggregate** | — | **32.1%** |
-
-The token savings are quadratic in task length: long tasks (20+ steps) routinely exceed 40%.
-
----
-
-## Scripts
-
-| Command | Description |
-|---|---|
-| `npm run build` | Compile TypeScript to `dist/` |
-| `npm test` | Run the full test suite (Vitest) |
-| `npm run test:watch` | Run tests in watch mode |
-| `npm run typecheck` | Type-check everything including tests |
-| `npm run lint` | ESLint |
-| `npm run format` | Prettier |
-| `npm run benchmark` | Run all benchmark tasks |
-| `npm run benchmark:lumen` | Benchmark Lumen only |
-| `npm run benchmark:stagehand` | Benchmark Stagehand only |
-| `npm run benchmark:browser-use` | Benchmark browser-use only |
-| `npm run benchmark:setup` | Set up benchmark dependencies |
-
----
-
 ## Architecture
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for an in-depth breakdown of every layer.
+```
+Agent → Session → PerceptionLoop
+  ├── HistoryManager (wire + semantic, 2-tier compression)
+  ├── ActionRouter (pixel dispatch + timing)
+  ├── ModelAdapter (stream/step/summarize)
+  ├── StateStore (writeState memory)
+  ├── RepeatDetector (3-layer stuck detection)
+  ├── Verifier (completion verification)
+  └── ActionCache (on-disk replay)
+```
 
-See [docs/HAPPY_PATH.md](docs/HAPPY_PATH.md) for annotated walkthroughs of common usage patterns.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full breakdown.
 
-See [docs/COMPARISON.md](docs/COMPARISON.md) for a technical comparison with Stagehand, browser-use, Skyvern, and Magnitude.
+See [docs/HAPPY_PATH.md](docs/HAPPY_PATH.md) for annotated usage walkthroughs.
 
----
+See [docs/COMPARISON.md](docs/COMPARISON.md) for a technical comparison with other browser agent frameworks.
 
 ## Troubleshooting
 
-### Chrome fails to launch
+**Chrome fails to launch** — verify Chrome is installed (`google-chrome --version`). On Linux CI, launch Chrome with `--no-sandbox` yourself and use `browser: { type: "cdp", url: "ws://..." }`.
 
-```
-Error: Chrome process exited
-```
+**API key not found** — falls back to env vars: `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY` / `GEMINI_API_KEY`, `OPENAI_API_KEY`.
 
-1. Verify Chrome is installed: `google-chrome --version` or `chromium --version`
-2. On Linux CI, add `--no-sandbox`: use `browser: { type: "cdp", url: "..." }` and launch Chrome with `--no-sandbox --disable-setuid-sandbox` yourself.
-3. Try a non-default port if 9222 is occupied: `browser: { type: "local", port: 9333 }`.
+**Loop hits maxSteps** — increase `maxSteps`, add a focused `systemPrompt`, or use `verbose: 2` to debug.
 
-### API key not found
+**BROWSER_DISCONNECTED** — the CDP socket closed unexpectedly. This is the only error that throws; all action errors are fed back to the model.
 
-Each provider reads a default env var when `apiKey` is omitted:
-
-| Provider | Env var |
-|---|---|
-| Anthropic | `ANTHROPIC_API_KEY` |
-| Google | `GOOGLE_API_KEY` or `GEMINI_API_KEY` |
-| OpenAI | `OPENAI_API_KEY` |
-
-### Loop hits `maxSteps` without finishing
-
-Increase `maxSteps` for complex tasks. Consider adding a `systemPrompt` that focuses the model on efficient execution. For debugging, set `verbose: 2` to see every action.
-
-### `BROWSER_DISCONNECTED` error
-
-The CDP connection dropped (browser crashed or was closed externally). This is the only error type that throws out of the loop — all other action errors are fed back to the model. Restart the agent.
-
-### Types not resolving
-
-This package is ESM-only with `"type": "module"`. Ensure your `tsconfig.json` has `"moduleResolution": "bundler"` or `"node16"/"nodenext"`, and that you import with the `.js` extension in TypeScript source files.
-
----
+**ESM import errors** — this package is ESM-only. Use `"moduleResolution": "bundler"` or `"nodenext"` in `tsconfig.json`.
 
 ## License
 
