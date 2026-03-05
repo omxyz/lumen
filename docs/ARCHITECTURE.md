@@ -30,6 +30,9 @@ Deep dive into every layer of the engine. Start here if you are extending Lumen,
   - [PreActionHook](#preactionhook)
   - [CompletionGate](#completiongate)
 - [ChildLoop (delegation)](#childloop-delegation)
+- [RepeatDetector](#repeatdetector)
+- [ActionCache](#actioncache)
+- [LumenLogger](#lumenlogger)
 - [Planner](#planner)
 - [Observability](#observability)
   - [LoopMonitor](#loopmonitor)
@@ -63,7 +66,7 @@ Deep dive into every layer of the engine. Start here if you are extending Lumen,
       │                │               │
 ┌─────▼──────┐  ┌──────▼──────┐ ┌─────▼──────┐
 │HistoryMgr  │  │ActionRouter │ │ModelAdapter│
-│wire+semantic│  │denormalize  │ │stream/step │
+│wire+semantic│  │dispatch     │ │stream/step │
 │compress    │  │browser calls│ │summarize   │
 └────────────┘  └──────┬──────┘ └────────────┘
                         │
@@ -83,6 +86,7 @@ Every step of the perception loop follows this sequence:
 
 ```
 1. Proactive compaction (if token utilization > threshold)
+1b. URL stall detection (RepeatDetector.recordUrl)
 2. Take screenshot (with optional cursor overlay)
 3. Store screenshot in wire history
 4. Build StepContext (screenshot + wire history + state)
@@ -94,12 +98,14 @@ Every step of the perception loop follows this sequence:
    c. ActionRouter.execute()
    d. Buffer outcome (not written to wire yet)
    e. If terminate: verify with CompletionGate, drain stream
-   f. If delegate: run ChildLoop
+   f. Repeat detection (RepeatDetector.record) — stash nudge for next step
+   g. If delegate: run ChildLoop
 7. Record assistant turn in wire history (adapter.getLastStreamResponse)
 8. Replay buffered action outcomes as tool_results in wire history
 9. Notify monitor: stepCompleted
 10. Tier-1 screenshot compression (compressScreenshots)
 11. Append SemanticStep to semantic history
+11b. Form state extraction — if step had form actions, extract visible input values via CDP
 12. Repeat or exit if maxSteps
 ```
 
@@ -124,6 +130,8 @@ type WireMessage =
   | { role: "tool_result"; tool_call_id: string; action: string; ok: boolean; error?: string }
   | { role: "summary"; content: string; compactedAt: number }
 ```
+
+Note: The TypeScript type is simplified to `Record<string, unknown>` for flexibility. The actual wire records follow the shapes above by convention.
 
 Each adapter's `buildMessages()` function translates this flat array into the provider-specific message format. The wire format is provider-agnostic.
 
@@ -151,19 +159,27 @@ Every coordinate in the codebase lives in one of two spaces:
 
 | Space | Range | Who uses it |
 |---|---|---|
-| **Normalized** (NormalizedCoord) | 0–1000 | Models, CUAAction, wire history |
-| **Pixels** | 0–width/height | BrowserTab methods, CDP protocol |
+| **Provider-native** | Varies per provider | Raw model output before decoding |
+| **Pixels** (PixelCoord) | 0–width/height | CUAAction, ActionRouter, BrowserTab |
 
-The conversion happens exactly once, in `ActionRouter.execute()`:
+Coordinate conversion happens at **decode time** inside `ActionDecoder`, not in `ActionRouter`:
+
+- **Anthropic**: `computer_20251124` (Claude 4.x) emits pixel coordinates — passed through directly.
+- **Google**: Emits 0–1000 normalized coordinates — `denormalize()` converts to pixels in `ActionDecoder.fromGoogle()`.
+- **OpenAI**: `computer-use-preview` emits pixel coordinates — passed through directly.
+- **Custom/Generic**: `fromGeneric()` expects 0–1000 — `denormalize()` converts to pixels.
+
+By the time a `CUAAction` reaches `ActionRouter`, all coordinates are in viewport pixels. The router dispatches them directly without any conversion:
 
 ```typescript
-// src/loop/router.ts
-const x = denormalize(action.x, viewport.width);   // NormalizedCoord → px
-const y = denormalize(action.y, viewport.height);
-await tab.click(x, y, { button: action.button });
+// src/loop/router.ts — no coordinate conversion
+case "click": {
+  const outcome = await tab.click(action.x, action.y, { button: action.button ?? "left" });
+  // ...
+}
 ```
 
-And the helpers:
+The helpers remain available for adapters that need them:
 
 ```typescript
 // src/model/adapter.ts
@@ -175,8 +191,6 @@ export function normalize(pixel: number, dimension: number): number {
   return Math.round((pixel / dimension) * 1000);
 }
 ```
-
-Models that natively use different coordinate spaces (e.g. Anthropic's `computer_20250124` uses pixels, `computer_20251124` uses a patch grid) have that handled entirely inside the adapter's `ActionDecoder` — the CUAAction that emerges is always in 0–1000 space.
 
 ---
 
@@ -250,11 +264,10 @@ Task state: {"min_price":"£3.49","min_title":"Sharp Objects"}
 ## ActionRouter
 
 `ActionRouter` is the single place where:
-1. Coordinates are denormalized from 0–1000 to pixels.
-2. CUAActions are dispatched to the appropriate `BrowserTab` method.
-3. Post-action sleep delays are applied.
-4. Special actions (`writeState`, `terminate`, `delegate`, `screenshot`) are handled without touching the browser.
-5. Errors from `BrowserTab` are caught and returned as `ActionExecution` objects (never thrown).
+1. CUAActions (already in pixel coordinates) are dispatched to the appropriate `BrowserTab` method.
+2. Post-action sleep delays are applied.
+3. Special actions (`writeState`, `terminate`, `delegate`, `screenshot`) are handled without touching the browser.
+4. Errors from `BrowserTab` are caught and returned as `ActionExecution` objects (never thrown).
 
 ```typescript
 execute(action: CUAAction, tab: BrowserTab, state: StateStore): Promise<ActionExecution>
@@ -317,13 +330,13 @@ The loop uses `stream()` exclusively. `step()` is used by the planner and by `Cu
 
 - Uses `@google/genai` with the `computerUse` tool.
 - `contextWindowTokens: 1_000_000` (Gemini 1M context)
-- Coordinates from Google are in 0–1000 space natively; ActionDecoder passes them through.
+- Coordinates from Google are in 0–1000 space natively; `ActionDecoder.fromGoogle()` converts them to pixels via `denormalize()`.
 
 ### OpenAIAdapter
 
 - Uses the `openai` SDK's Responses API (`client.responses.create`).
 - `nativeComputerUse: true`
-- Normalizes OpenAI computer-tool coordinates to 0–1000 in `ActionDecoder`.
+- OpenAI `computer-use-preview` emits pixel coordinates; `ActionDecoder` passes them through directly.
 
 ### CustomAdapter
 
@@ -357,7 +370,7 @@ interface BrowserTab {
 }
 ```
 
-All coordinate parameters are in **pixels** (already denormalized by `ActionRouter`). All methods return `ActionOutcome` — `{ ok: boolean; error?: string }` — never throw.
+All coordinate parameters are in **pixels** (converted at decode time by `ActionDecoder`). All methods return `ActionOutcome` — `{ ok: boolean; error?: string }` — never throw.
 
 ### CDPTab
 
@@ -415,6 +428,7 @@ If the gate fails, the termination is rejected and the loop continues — the er
 Built-in gates:
 - `UrlMatchesGate(pattern: RegExp)` — passes if the current URL matches the pattern.
 - `CustomGate(fn, failureReason)` — passes if `fn(screenshot, url)` resolves to `true`.
+- `ModelVerifier(adapter, task, maxAttempts?)` — uses the model itself to judge task completion from the screenshot. Hard-passes after `maxAttempts` (default: 2) to prevent infinite gate loops.
 
 ---
 
@@ -431,6 +445,54 @@ Parent loop:
   → ChildLoop terminates
   → Parent loop continues
 ```
+
+---
+
+## RepeatDetector
+
+`RepeatDetector` identifies when the agent is stuck repeating actions or stalling on a single page. It uses three detection layers:
+
+1. **Action-level**: Hashes each action (with 64px coordinate bucketing) and checks for exact repeats within a rolling 20-action window. Triggers at 5, 8, and 12 repeats.
+2. **Category-level**: Classifies actions as "productive" (click, type, goto), "passive" (scroll, wait, hover), or "noop" (screenshot). Triggers when a non-productive category dominates the window.
+3. **URL-level**: Tracks how many steps are spent on the same URL (normalized to origin+pathname to ignore tracking parameters). Triggers at configurable thresholds with escalation.
+
+When a threshold is hit, a nudge message is injected into the system prompt for the next step. Nudges are sticky — they persist until the model takes a productive action (for action nudges) or navigates to a different URL (for URL nudges). Nudge severity escalates:
+
+- **Level 5**: Gentle hint to try something different.
+- **Level 8**: Warning with concrete suggestions (try keyboard navigation, save progress).
+- **Level 12**: Critical strategy reset demanding the model change approach immediately.
+
+---
+
+## ActionCache
+
+Optional on-disk cache that stores successful actions keyed by `(actionType, url, instructionHash)`. Enabled by passing `cacheDir` to `SessionOptions`.
+
+For coordinate-based actions (click, scroll, hover, drag), the cache also stores a screenshot hash. On cache hit, if the current screenshot hash differs significantly (similarity < 0.92), the cached action is invalidated — this prevents replaying clicks on a page whose layout has changed.
+
+Currently uses exact SHA-256 hash comparison. The `similarity()` function is a stub intended to be replaced with a perceptual hash for fuzzy matching.
+
+---
+
+## LumenLogger
+
+`LumenLogger` is a granular debug logger threaded through every Lumen layer. Log level is controlled by:
+
+1. `LUMEN_LOG` env var: `"debug"` | `"info"` | `"warn"` | `"error"` | `"silent"` (highest priority)
+2. `verbose` constructor arg: 0=silent, 1=info (default), 2=info+all surfaces
+
+Individual surfaces can be enabled independently via env vars:
+
+| Env var | Surface | Typical output |
+|---|---|---|
+| `LUMEN_LOG_CDP` | CDP WebSocket | Wire traffic: commands, responses, events |
+| `LUMEN_LOG_ACTIONS` | ActionRouter | Dispatch with pixel coords and timing |
+| `LUMEN_LOG_BROWSER` | CDPTab | Navigation, input, screenshot ops |
+| `LUMEN_LOG_HISTORY` | HistoryManager | Compaction and compression state |
+| `LUMEN_LOG_ADAPTER` | ModelAdapter | Call timing and token counts |
+| `LUMEN_LOG_LOOP` | PerceptionLoop | Step internals, utilization |
+
+The optional `logger` callback receives every emitted `LogLine` as structured data, regardless of console verbosity level — useful for piping into external logging systems.
 
 ---
 
@@ -570,6 +632,8 @@ src/index.ts          ← public surface
         src/loop/gate.ts          ← CompletionGate
         src/loop/monitor.ts       ← LoopMonitor
         src/loop/child.ts         ← ChildLoop
+        src/loop/repeat-detector.ts ← RepeatDetector
+        src/loop/action-cache.ts    ← ActionCache
       src/model/adapter.ts        ← ModelAdapter interface + coord helpers
         src/model/anthropic.ts    ← AnthropicAdapter
         src/model/google.ts       ← GoogleAdapter
@@ -588,6 +652,7 @@ src/index.ts          ← public surface
     src/loop/planner.ts           ← runPlanner
     src/loop/streaming-monitor.ts ← StreamingMonitor
   src/errors.ts       ← CUAError
+  src/logger.ts         ← LumenLogger
   src/types.ts        ← all shared types
 ```
 

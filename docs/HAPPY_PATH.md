@@ -20,6 +20,8 @@ Annotated examples for the most common Lumen usage patterns. Each section is sel
 14. [Planner-assisted execution](#14-planner-assisted-execution)
 15. [Custom monitor / observability](#15-custom-monitor--observability)
 16. [Bring your own adapter (advanced)](#16-bring-your-own-adapter-advanced)
+17. [Pre-navigating with startUrl](#17-pre-navigating-with-starturl)
+18. [Debug logging](#18-debug-logging)
 
 ---
 
@@ -404,17 +406,16 @@ await agent.run({ instruction: "..." });
 await agent.close();  // closes the CDP connection but does NOT kill Chrome
 ```
 
-For lower-level control, use `CUASession` directly with manually constructed adapters and tabs:
+For lower-level control, use `Session` directly with manually constructed adapters and tabs:
 
 ```typescript
-import { CUASession, CDPTab, CdpConnection, AnthropicAdapter } from "@omlabs/lumen";
+import { Session, CDPTab, CdpConnection, AnthropicAdapter } from "@omlabs/lumen";
 
 const conn = await CdpConnection.connect(wsUrl);
 const tab = new CDPTab(conn.mainSession());
 const adapter = new AnthropicAdapter("claude-sonnet-4-6", process.env.ANTHROPIC_API_KEY);
 
-const session = new CUASession({ tab, adapter, maxSteps: 20 });
-await session.init();
+const session = new Session({ tab, adapter, maxSteps: 20 });
 
 const result = await session.run({ instruction: "Click the login button." });
 const snapshot = session.serialize();
@@ -683,15 +684,77 @@ class MyCustomAdapter implements ModelAdapter {
   }
 }
 
-// Use with CUASession directly
-import { CUASession, CDPTab, CdpConnection } from "@omlabs/lumen";
+// Use with Session directly
+import { Session, CDPTab, CdpConnection } from "@omlabs/lumen";
 
 const conn = await CdpConnection.connect("ws://...");
 const tab = new CDPTab(conn.mainSession());
 const adapter = new MyCustomAdapter();
 
-const session = new CUASession({ tab, adapter });
-await session.init();
+const session = new Session({ tab, adapter });
 await session.run({ instruction: "..." });
 conn.close();
 ```
+
+---
+
+## 17. Pre-navigating with startUrl
+
+Skip 1-2 model steps by navigating to the starting URL before the first model call.
+
+```typescript
+import { Agent } from "@omlabs/lumen";
+
+const result = await Agent.run({
+  model: "anthropic/claude-sonnet-4-6",
+  apiKey: process.env.ANTHROPIC_API_KEY,
+  browser: { type: "local", headless: true },
+  instruction: "Find the price of the cheapest flight from JFK to LAX next Friday.",
+  startUrl: "https://www.google.com/travel/flights",
+  maxSteps: 15,
+});
+
+console.log(result.result);
+```
+
+The model sees the target page on its very first screenshot instead of starting from a blank tab.
+
+---
+
+## 18. Debug logging
+
+Lumen's `LumenLogger` provides per-surface debug logging controlled by environment variables.
+
+```bash
+# Enable all debug surfaces at once
+LUMEN_LOG=debug npm run start
+
+# Enable only specific surfaces
+LUMEN_LOG_CDP=1 npm run start       # CDP WebSocket wire traffic
+LUMEN_LOG_ACTIONS=1 npm run start   # ActionRouter dispatch + timing
+LUMEN_LOG_BROWSER=1 npm run start   # CDPTab navigation/input/screenshot
+LUMEN_LOG_HISTORY=1 npm run start   # HistoryManager compaction state
+LUMEN_LOG_ADAPTER=1 npm run start   # Model adapter call timing + tokens
+LUMEN_LOG_LOOP=1 npm run start      # PerceptionLoop step internals
+
+# Combine surfaces
+LUMEN_LOG_ACTIONS=1 LUMEN_LOG_LOOP=1 npm run start
+```
+
+Or configure programmatically with `verbose: 2` to enable all surfaces:
+
+```typescript
+import { Agent } from "@omlabs/lumen";
+
+const agent = new Agent({
+  model: "anthropic/claude-sonnet-4-6",
+  browser: { type: "local" },
+  verbose: 2,  // Enables all debug surfaces
+  logger: (line) => {
+    // Structured callback receives EVERY log line regardless of console verbosity
+    myTelemetry.log(line);
+  },
+});
+```
+
+The `LumenLogger` is threaded through all layers -- PerceptionLoop, ActionRouter, HistoryManager, CDPTab, and model adapters -- so you can trace a single action from model output through coordinate decoding to CDP dispatch.

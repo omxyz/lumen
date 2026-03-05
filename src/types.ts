@@ -1,7 +1,7 @@
 // ─── Coordinates ─────────────────────────────────────────────────────────────
 
-/** Normalized model-space coordinate (0–1000). Never sent to browser directly. */
-export type NormalizedCoord = number;
+/** Pixel coordinate in viewport space. Sent directly to browser. */
+export type PixelCoord = number;
 
 export interface Point {
   x: number;
@@ -39,13 +39,14 @@ export type TaskState = Record<string, unknown>;
 
 // ─── CUA Actions ─────────────────────────────────────────────────────────────
 
-/** All coordinates are in normalized 0–1000 space. Denormalization to pixels
- *  happens exactly once, in ActionRouter, just before browser dispatch. */
+/** All coordinates are in viewport pixel space. Decoders convert from each
+ *  provider's native format (Anthropic/OpenAI pixels, Google 0-1000) to pixels
+ *  at decode time. ActionRouter uses coords directly without conversion. */
 export type CUAAction =
-  | { type: "click"; x: NormalizedCoord; y: NormalizedCoord; button?: "left" | "right" | "middle" }
-  | { type: "doubleClick"; x: NormalizedCoord; y: NormalizedCoord }
-  | { type: "drag"; startX: NormalizedCoord; startY: NormalizedCoord; endX: NormalizedCoord; endY: NormalizedCoord }
-  | { type: "scroll"; x: NormalizedCoord; y: NormalizedCoord; direction: "up" | "down" | "left" | "right"; amount: number }
+  | { type: "click"; x: PixelCoord; y: PixelCoord; button?: "left" | "right" | "middle" }
+  | { type: "doubleClick"; x: PixelCoord; y: PixelCoord }
+  | { type: "drag"; startX: PixelCoord; startY: PixelCoord; endX: PixelCoord; endY: PixelCoord }
+  | { type: "scroll"; x: PixelCoord; y: PixelCoord; direction: "up" | "down" | "left" | "right"; amount: number }
   | { type: "type"; text: string }
   | { type: "keyPress"; keys: string[] }
   | { type: "wait"; ms: number }
@@ -53,7 +54,7 @@ export type CUAAction =
   | { type: "writeState"; data: TaskState }
   | { type: "screenshot" }
   | { type: "terminate"; status: "success" | "failure"; result: string }
-  | { type: "hover"; x: NormalizedCoord; y: NormalizedCoord }
+  | { type: "hover"; x: PixelCoord; y: PixelCoord }
   | { type: "delegate"; instruction: string; maxSteps?: number };
 
 // ─── Action Outcome ───────────────────────────────────────────────────────────
@@ -118,6 +119,8 @@ export interface LoopOptions {
   systemPrompt?: string;
   /** 0.0–1.0. Trigger LLM compaction at this utilization level. Default: 0.8 */
   compactionThreshold?: number;
+  /** Hash of the original task instruction, used as part of the action cache key. */
+  instructionHash?: string;
 }
 
 export interface LoopResult {
@@ -222,7 +225,7 @@ export interface AgentOptions {
   policy?: import("./loop/policy.js").SessionPolicyOptions;
   /** Optional hook called before every action. Return deny to block with reason. */
   preActionHook?: PreActionHook;
-  completionGate?: import("./loop/gate.js").CompletionGate;
+  completionGate?: import("./loop/gate.js").Verifier;
   monitor?: import("./loop/monitor.js").LoopMonitor;
   /** Resume with pre-loaded history. Prefer Agent.resume() for full roundtrip. */
   initialHistory?: import("./types.js").SerializedHistory;

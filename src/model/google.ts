@@ -1,14 +1,11 @@
 import { GoogleGenAI, Environment } from "@google/genai";
 import type { ModelAdapter, StepContext } from "./adapter.js";
 import type { ModelResponse } from "./adapter.js";
+import { withRetry } from "./adapter.js";
 import type { CUAAction, TaskState, WireMessage } from "../types.js";
 import { ActionDecoder } from "./decoder.js";
 
 const decoder = new ActionDecoder();
-
-async function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
 
 function buildSystemInstruction(context: StepContext): string {
   const parts: string[] = [];
@@ -27,10 +24,25 @@ function buildSystemInstruction(context: StepContext): string {
     "\n- EFFICIENT SCROLLING: To move through a long page, press the Page_Down key (keyPress action) instead of small mouse scrolls — each Page_Down advances a full screen and covers content 3x faster." +
     "\n- TRUST YOUR MEMORY: If you have already memorized data from a page, do NOT navigate back to that page to re-verify. Trust what you recorded and use it directly to answer." +
     "\n- MULTI-PAGE COLLECTION: Collect data page by page, memorize as you go, then terminate once you have data from all pages. Never revisit a page you already processed." +
-    "\n- BE DECISIVE: Once you have sufficient information to answer the task, call terminate immediately. Do not keep scrolling or browsing to double-check.",
+    "\n- BE DECISIVE: Once you have sufficient information to answer the task, call terminate immediately. Do not keep scrolling or browsing to double-check." +
+    "\n- THINK FIRST: Before acting, briefly consider: What key information is visible? What have I accomplished? What is my next step?" +
+    "\n- CHECKPOINT PROGRESS: Save your findings every 3-5 steps so they persist even if history is compacted. Include ALL data collected so far." +
+    "\n- VERIFY ACTIONS: After any form interaction (date picker, dropdown, filter, checkbox), CHECK the next screenshot to confirm your selection was applied correctly. If the field shows a wrong value or the filter shows wrong results, try again with a different approach." +
+    "\n- DATE PICKERS: 1) First try typing the date directly into the input field (common formats: MM/DD/YYYY, YYYY-MM-DD). 2) If using a calendar widget, navigate to the correct MONTH first using arrow buttons, then click the specific date. 3) After selecting, READ the date field value in the next screenshot to verify it matches your intent." +
+    "\n- FORMS: Fill one field at a time. For dropdowns, click to open then click the exact option text. If an element doesn't respond to clicks, try Tab key to move between fields, or type directly into focused inputs." +
+    "\n- URL FALLBACK: If form filling (especially date pickers or complex filters) fails after 2-3 attempts, construct the search URL with query parameters and navigate directly. Most sites encode search parameters in the URL (e.g. check-in/check-out dates, destinations, filters)." +
+    "\n- COMPLETE ALL SUB-TASKS: If the task asks for multiple pieces of information, track each one. Do NOT call terminate until ALL requested items are found." +
+    "\n- NEVER HALLUCINATE: Only report information you can see on screen. If a specific piece of data is not visible, say so rather than guessing.",
   );
   if (context.agentState && Object.keys(context.agentState).length > 0) {
     parts.push(`Current state: ${JSON.stringify(context.agentState)}`);
+  }
+  // Urgency warning when nearing step limit
+  const stepsRemaining = context.maxSteps - context.stepIndex - 1;
+  if (stepsRemaining <= Math.max(3, Math.floor(context.maxSteps * 0.1))) {
+    parts.push(
+      `⚠️ URGENT: Only ${stepsRemaining} step(s) remaining! You MUST call terminate with your best answer on your NEXT action. Do NOT continue browsing.`,
+    );
   }
   return parts.join("\n\n");
 }
@@ -82,26 +94,8 @@ export class GoogleAdapter implements ModelAdapter {
     this.conversationHistory = [initial, ...recent];
   }
 
-  private async callWithRetry<T>(fn: () => Promise<T>): Promise<T> {
-    let delay = 1000;
-    for (let attempt = 0; attempt < 4; attempt++) {
-      try {
-        return await fn();
-      } catch (err: unknown) {
-        const error = err as { status?: number; code?: number };
-        if ((error.status === 429 || error.status === 503 || error.code === 429) && attempt < 3) {
-          await sleep(delay + Math.random() * 500);
-          delay *= 2;
-          continue;
-        }
-        throw err;
-      }
-    }
-    throw new Error("Max retries exceeded");
-  }
-
   async step(context: StepContext): Promise<ModelResponse> {
-    return this.callWithRetry(async () => {
+    return withRetry(async () => {
       const systemInstruction = buildSystemInstruction(context);
       const screenshotData = context.screenshot.data.toString("base64");
 
@@ -199,11 +193,12 @@ export class GoogleAdapter implements ModelAdapter {
 
         // Decode action calls and return them to PerceptionLoop
         const actions: CUAAction[] = [];
+        const googleViewport = { width: context.screenshot.width, height: context.screenshot.height };
         for (const fc of actionCalls) {
           const action = decoder.fromGoogle({
             name: fc.name,
             args: (fc.args ?? {}) as Record<string, unknown>,
-          });
+          }, googleViewport);
           actions.push(action);
         }
 

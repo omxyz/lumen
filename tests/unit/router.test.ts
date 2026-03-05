@@ -33,17 +33,17 @@ function makeMockTab(viewport: ViewportSize = { width: 1280, height: 720 }): Bro
 describe("ActionRouter", () => {
   const state = new StateStore();
 
-  it("click denormalizes (500, 500) on 1280x720 to (640, 360)", async () => {
+  it("click passes pixel coords (640, 360) directly to browser", async () => {
     const tab = makeMockTab({ width: 1280, height: 720 });
     const router = new ActionRouter({ afterClick: 0 });
-    await router.execute({ type: "click", x: 500, y: 500 }, tab, state);
+    await router.execute({ type: "click", x: 640, y: 360 }, tab, state);
     expect(tab.click).toHaveBeenCalledWith(640, 360, { button: "left" });
   });
 
   it("scroll direction 'down' maps to positive deltaY", async () => {
     const tab = makeMockTab();
     const router = new ActionRouter({ afterScroll: 0 });
-    await router.execute({ type: "scroll", x: 500, y: 500, direction: "down", amount: 3 }, tab, state);
+    await router.execute({ type: "scroll", x: 640, y: 360, direction: "down", amount: 3 }, tab, state);
     const callArgs = (tab.scroll as ReturnType<typeof vi.fn>).mock.calls[0] as [number, number, number, number];
     const [, , deltaX, deltaY] = callArgs;
     expect(deltaX).toBe(0);
@@ -53,7 +53,7 @@ describe("ActionRouter", () => {
   it("scroll direction 'up' maps to negative deltaY", async () => {
     const tab = makeMockTab();
     const router = new ActionRouter({ afterScroll: 0 });
-    await router.execute({ type: "scroll", x: 500, y: 500, direction: "up", amount: 3 }, tab, state);
+    await router.execute({ type: "scroll", x: 640, y: 360, direction: "up", amount: 3 }, tab, state);
     const callArgs = (tab.scroll as ReturnType<typeof vi.fn>).mock.calls[0] as [number, number, number, number];
     const [, , , deltaY] = callArgs;
     expect(deltaY).toBeLessThan(0);
@@ -76,10 +76,10 @@ describe("ActionRouter", () => {
     expect(result.result).toBe("done");
   });
 
-  it("hover denormalizes coordinates", async () => {
+  it("hover passes pixel coords directly", async () => {
     const tab = makeMockTab({ width: 1280, height: 720 });
     const router = new ActionRouter({ afterClick: 0 });
-    await router.execute({ type: "hover", x: 500, y: 500 }, tab, state);
+    await router.execute({ type: "hover", x: 640, y: 360 }, tab, state);
     expect(tab.hover).toHaveBeenCalledWith(640, 360);
   });
 

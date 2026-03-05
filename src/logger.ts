@@ -88,7 +88,7 @@ export class LumenLogger {
     if (this.cdpEnabled) this.emit("debug", `[cdp] ${msg}`, data);
   }
 
-  /** ActionRouter action dispatch with denormalized coords and timing. */
+  /** ActionRouter action dispatch with pixel coords and timing. */
   action(msg: string, data?: Record<string, unknown>): void {
     if (this.actionsEnabled) this.emit("debug", `[action] ${msg}`, data);
   }

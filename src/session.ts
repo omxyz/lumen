@@ -1,6 +1,6 @@
 import type { ModelAdapter } from "./model/adapter.js";
 import type { BrowserTab } from "./browser/tab.js";
-import type { CompletionGate } from "./loop/gate.js";
+import type { Verifier } from "./loop/gate.js";
 import type { LoopMonitor } from "./loop/monitor.js";
 import type { RouterTiming } from "./loop/router.js";
 import type { SessionPolicyOptions } from "./loop/policy.js";
@@ -49,7 +49,7 @@ export interface SessionOptions {
   preActionHook?: PreActionHook;
 
   /** Verify terminate before accepting the exit. */
-  completionGate?: CompletionGate;
+  completionGate?: Verifier;
 
   /** Observability hook called at each step. */
   monitor?: LoopMonitor;
@@ -63,6 +63,9 @@ export interface SessionOptions {
 
   /** Granular debug logger — threaded into PerceptionLoop, ActionRouter, and HistoryManager. */
   log?: LumenLogger;
+
+  /** Enable action caching. Pass a directory path to enable. */
+  cacheDir?: string;
 }
 
 export class Session {
@@ -122,6 +125,7 @@ export class Session {
       cursorOverlay: this.opts.cursorOverlay,
       compactionAdapter: this.opts.compactionAdapter,
       log: this.log,
+      cacheDir: this.opts.cacheDir,
     });
 
     // Prepend the per-run instruction to the session-level system prompt
@@ -130,10 +134,16 @@ export class Session {
       this.opts.systemPrompt ?? "",
     ].filter(Boolean).join("\n\n") || undefined;
 
+    // Compute instruction hash for action cache key
+    const instructionHash = this.opts.cacheDir && options.instruction
+      ? (await import("crypto")).createHash("sha256").update(options.instruction).digest("hex").slice(0, 16)
+      : undefined;
+
     const loopResult = await loop.run({
       maxSteps,
       systemPrompt,
       compactionThreshold: this.opts.compactionThreshold,
+      instructionHash,
     });
 
     this.log.loop(

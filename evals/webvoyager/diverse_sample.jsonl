@@ -1,0 +1,30 @@
+{"web_name": "Allrecipes", "id": "Allrecipes--0", "ques": "Provide a recipe for vegetarian lasagna with more than 100 reviews and a rating of at least 4.5 stars suitable for 6 people.", "web": "https://www.allrecipes.com/"}
+{"web_name": "Allrecipes", "id": "Allrecipes--1", "ques": "Find a recipe for a vegetarian lasagna that has at least a four-star rating and uses zucchini.", "web": "https://www.allrecipes.com/"}
+{"web_name": "Amazon", "id": "Amazon--0", "ques": "Search an Xbox Wireless controller with green color and rated above 4 stars.", "web": "https://www.amazon.com/"}
+{"web_name": "Amazon", "id": "Amazon--1", "ques": "Search for women's golf polos in m size, priced between 50 to 75 dollars, and save the lowest priced among results.", "web": "https://www.amazon.com/"}
+{"web_name": "Apple", "id": "Apple--0", "ques": "Compare the prices of the latest models of MacBook Air available on Apple's website.", "web": "https://www.apple.com/"}
+{"web_name": "Apple", "id": "Apple--1", "ques": "Research the new features of the iOS 17 on Apple support and check its compatibility with the iPhone 12.", "web": "https://www.apple.com/"}
+{"web_name": "ArXiv", "id": "ArXiv--0", "ques": "Search for the latest preprints about 'quantum computing'.", "web": "https://arxiv.org/"}
+{"web_name": "ArXiv", "id": "ArXiv--1", "ques": "Search for the latest research papers on quantum computing submitted to ArXiv within the last two days.", "web": "https://arxiv.org/"}
+{"web_name": "BBC News", "id": "BBC News--0", "ques": "Find a report on the BBC News website about recent developments in renewable energy technologies in the UK.", "web": "https://www.bbc.com/news/"}
+{"web_name": "BBC News", "id": "BBC News--1", "ques": "Read the latest health-related news article published on BBC News and summarize the key points discussed.", "web": "https://www.bbc.com/news/"}
+{"web_name": "Booking", "id": "Booking--0", "ques": "Find a Mexico hotel with deals for December 25-26.", "web": "https://www.booking.com/"}
+{"web_name": "Booking", "id": "Booking--1", "ques": "Find the cheapest available hotel room for a three night stay from 1st Jan in Jakarta. The room is for 2 adults, just answer the cheapest hotel room and the price.", "web": "https://www.booking.com/"}
+{"web_name": "Cambridge Dictionary", "id": "Cambridge Dictionary--0", "ques": "Look up the pronunciation and definition of the word \"sustainability\" on the Cambridge Dictionary.", "web": "https://dictionary.cambridge.org/"}
+{"web_name": "Cambridge Dictionary", "id": "Cambridge Dictionary--1", "ques": "Find the pronunciation, definition, and a sample sentence for the word 'serendipity'.", "web": "https://dictionary.cambridge.org/"}
+{"web_name": "Coursera", "id": "Coursera--0", "ques": "Find a beginner-level online course about '3d printing' which lasts 1-3 months, and is provided by a renowned university.", "web": "https://www.coursera.org/"}
+{"web_name": "Coursera", "id": "Coursera--1", "ques": "Search for a beginner-level online course about Python programming, suitable for someone who has no programming experience on Coursera.", "web": "https://www.coursera.org/"}
+{"web_name": "ESPN", "id": "ESPN--0", "ques": "Look up the current standings for the NBA Eastern Conference on ESPN.", "web": "https://www.espn.com/"}
+{"web_name": "ESPN", "id": "ESPN--1", "ques": "Check the latest articles on ESPN for updates on any trades that occurred in the NBA within the past 2 days.", "web": "https://www.espn.com/"}
+{"web_name": "GitHub", "id": "GitHub--0", "ques": "Search for an open-source project related to 'climate change data visualization' on GitHub and report the project with the most stars.", "web": "https://github.com/"}
+{"web_name": "GitHub", "id": "GitHub--1", "ques": "Search for an open-source repository for machine learning in Python, specifically focused on decision trees, updated within the last 2 days.", "web": "https://github.com/"}
+{"web_name": "Google Flights", "id": "Google Flights--0", "ques": "Book a journey with return option on same day from Edinburg to Manchester on December 28th and show me the lowest price option available.", "web": "https://www.google.com/travel/flights/"}
+{"web_name": "Google Flights", "id": "Google Flights--1", "ques": "Show me the list of one-way flights today (February 17, 2024) from Chicago to Paris.", "web": "https://www.google.com/travel/flights/"}
+{"web_name": "Google Map", "id": "Google Map--0", "ques": "Find 5 beauty salons with ratings greater than 4.8 in Seattle, WA.", "web": "https://www.google.com/maps/"}
+{"web_name": "Google Map", "id": "Google Map--1", "ques": "Tell me one bus stop that is nearest to the intersection of main street and Amherst street in Altavista.", "web": "https://www.google.com/maps/"}
+{"web_name": "Google Search", "id": "Google Search--0", "ques": "Find the initial release date for Guardians of the Galaxy Vol. 3 the movie.", "web": "https://www.google.com/"}
+{"web_name": "Google Search", "id": "Google Search--1", "ques": "Find Kevin Durant's bio", "web": "https://www.google.com/"}
+{"web_name": "Huggingface", "id": "Huggingface--0", "ques": "Find a pre-trained natural language processing model on Hugging Face that can perform sentiment analysis, and make sure the model's last update is within March 2023.", "web": "https://huggingface.co/"}
+{"web_name": "Huggingface", "id": "Huggingface--1", "ques": "Use the Huggingface Inference API to generate a short story about a dragon and a wizard.", "web": "https://huggingface.co/"}
+{"web_name": "Wolfram Alpha", "id": "Wolfram Alpha--0", "ques": "derivative of x^2 when x=5.6", "web": "https://www.wolframalpha.com/"}
+{"web_name": "Wolfram Alpha", "id": "Wolfram Alpha--1", "ques": "Give a constraint on the set of inequalities for the inner region of the pentagram.", "web": "https://www.wolframalpha.com/"}

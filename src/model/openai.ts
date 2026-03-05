@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { ModelAdapter, StepContext } from "./adapter.js";
 import type { ModelResponse } from "./adapter.js";
+import { withRetry } from "./adapter.js";
 import type { CUAAction, TaskState, WireMessage } from "../types.js";
 import { ActionDecoder } from "./decoder.js";
 
@@ -65,7 +66,7 @@ export class OpenAIAdapter implements ModelAdapter {
       (params as unknown as Record<string, unknown>).previous_response_id = this.previousResponseId;
     }
 
-    const response = await this.client.responses.create(params);
+    const response = await withRetry(() => this.client.responses.create(params));
     this.previousResponseId = response.id;
 
     const actions: CUAAction[] = [];
@@ -108,7 +109,7 @@ export class OpenAIAdapter implements ModelAdapter {
   }
 
   async summarize(wireHistory: WireMessage[], currentState: Record<string, unknown> | null): Promise<string> {
-    const response = await this.client.responses.create({
+    const response = await withRetry(() => this.client.responses.create({
       model: "gpt-4o-mini",
       input: [{
         role: "user" as const,
@@ -118,7 +119,7 @@ export class OpenAIAdapter implements ModelAdapter {
           `History (${wireHistory.length} messages): ${JSON.stringify(wireHistory.slice(-10))}`,
         ].filter(Boolean).join("\n\n"),
       }],
-    });
+    }));
 
     const firstOutput = response.output?.[0];
     if (firstOutput?.type === "message") {

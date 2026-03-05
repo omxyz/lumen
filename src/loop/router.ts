@@ -1,5 +1,4 @@
 import type { BrowserTab } from "../browser/tab.js";
-import { denormalize } from "../model/adapter.js";
 import type { ActionExecution, CUAAction, TaskState } from "../types.js";
 import type { StateStore } from "./state.js";
 import { LumenLogger } from "../logger.js";
@@ -13,8 +12,8 @@ export interface RouterTiming {
   afterNavigation?: number;  // Default: 1000ms
 }
 
-/** Translates CUAAction objects (normalized 0–1000 coords) into browser operations.
- *  Denormalization to pixels happens here, nowhere else.
+/** Translates CUAAction objects (pixel coords) into browser operations.
+ *  Coordinates are already in viewport pixels — no conversion needed.
  *  Errors are returned as ActionExecution, never thrown. */
 export class ActionRouter {
   private lastClickPx: { x: number; y: number } | null = null;
@@ -29,14 +28,13 @@ export class ActionRouter {
     tab: BrowserTab,
     state: StateStore,
   ): Promise<ActionExecution> {
-    const viewport = tab.viewport();
     const t0 = Date.now();
 
     switch (action.type) {
       case "click": {
-        const x = denormalize(action.x, viewport.width);
-        const y = denormalize(action.y, viewport.height);
-        this.log.action(`click norm(${action.x},${action.y}) → px(${x},${y}) btn=${action.button ?? "left"}`);
+        const x = action.x;
+        const y = action.y;
+        this.log.action(`click px(${x},${y}) btn=${action.button ?? "left"}`);
         const outcome = await tab.click(x, y, { button: action.button ?? "left" });
         const elapsed = Date.now() - t0;
         if (!outcome.ok) this.log.action(`click FAILED (${elapsed}ms): ${outcome.error}`, { elapsed, error: outcome.error });
@@ -47,9 +45,9 @@ export class ActionRouter {
       }
 
       case "doubleClick": {
-        const x = denormalize(action.x, viewport.width);
-        const y = denormalize(action.y, viewport.height);
-        this.log.action(`doubleClick norm(${action.x},${action.y}) → px(${x},${y})`);
+        const x = action.x;
+        const y = action.y;
+        this.log.action(`doubleClick px(${x},${y})`);
         const outcome = await tab.doubleClick(x, y);
         const elapsed = Date.now() - t0;
         if (!outcome.ok) this.log.action(`doubleClick FAILED (${elapsed}ms): ${outcome.error}`, { elapsed, error: outcome.error });
@@ -60,12 +58,12 @@ export class ActionRouter {
       }
 
       case "drag": {
-        const fromX = denormalize(action.startX, viewport.width);
-        const fromY = denormalize(action.startY, viewport.height);
-        const toX = denormalize(action.endX, viewport.width);
-        const toY = denormalize(action.endY, viewport.height);
+        const fromX = action.startX;
+        const fromY = action.startY;
+        const toX = action.endX;
+        const toY = action.endY;
         this.log.action(
-          `drag norm(${action.startX},${action.startY})→(${action.endX},${action.endY}) px(${fromX},${fromY})→(${toX},${toY})`,
+          `drag px(${fromX},${fromY})→(${toX},${toY})`,
         );
         const outcome = await tab.drag(fromX, fromY, toX, toY);
         const elapsed = Date.now() - t0;
@@ -76,15 +74,15 @@ export class ActionRouter {
       }
 
       case "scroll": {
-        const x = denormalize(action.x, viewport.width);
-        const y = denormalize(action.y, viewport.height);
+        const x = action.x;
+        const y = action.y;
         const amount = action.amount * 100;
         const [deltaX, deltaY] =
           action.direction === "right" ? [amount, 0]
           : action.direction === "left" ? [-amount, 0]
           : action.direction === "down" ? [0, amount]
           : [0, -amount];
-        this.log.action(`scroll norm(${action.x},${action.y}) → px(${x},${y}) dir=${action.direction} amount=${action.amount}`);
+        this.log.action(`scroll px(${x},${y}) dir=${action.direction} amount=${action.amount}`);
         const outcome = await tab.scroll(x, y, deltaX, deltaY);
         const elapsed = Date.now() - t0;
         if (!outcome.ok) this.log.action(`scroll FAILED (${elapsed}ms): ${outcome.error}`, { elapsed, error: outcome.error });
@@ -118,7 +116,7 @@ export class ActionRouter {
         this.log.action(`goto ${action.url}`);
         try {
           await tab.goto(action.url);
-          await tab.waitForLoad(this.timing.afterNavigation ?? 1000);
+          await tab.waitForLoad(this.timing.afterNavigation ?? 2000);
           const elapsed = Date.now() - t0;
           this.log.action(`goto ok (${elapsed}ms)`, { elapsed, url: action.url });
           return { ok: true };
@@ -157,9 +155,9 @@ export class ActionRouter {
       }
 
       case "hover": {
-        const x = denormalize(action.x, viewport.width);
-        const y = denormalize(action.y, viewport.height);
-        this.log.action(`hover norm(${action.x},${action.y}) → px(${x},${y})`);
+        const x = action.x;
+        const y = action.y;
+        this.log.action(`hover px(${x},${y})`);
         const outcome = await tab.hover(x, y);
         const elapsed = Date.now() - t0;
         if (!outcome.ok) this.log.action(`hover FAILED (${elapsed}ms): ${outcome.error}`, { elapsed, error: outcome.error });

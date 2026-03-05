@@ -5,15 +5,15 @@ const decoder = new ActionDecoder();
 const viewport = { width: 1280, height: 720 };
 
 describe("ActionDecoder.fromAnthropic", () => {
-  it("decodes left_click and normalizes coordinates", () => {
+  it("decodes left_click and passes pixel coordinates through", () => {
     const action = decoder.fromAnthropic(
       { name: "computer", input: { action: "left_click", coordinate: [640, 360] } },
       viewport,
     );
     expect(action.type).toBe("click");
     if (action.type === "click") {
-      expect(action.x).toBe(500); // 640/1280 * 1000
-      expect(action.y).toBe(500); // 360/720 * 1000
+      expect(action.x).toBe(640); // pixel pass-through
+      expect(action.y).toBe(360); // pixel pass-through
       expect(action.button).toBe("left");
     }
   });
@@ -63,15 +63,15 @@ describe("ActionDecoder.fromAnthropic", () => {
 });
 
 describe("ActionDecoder.fromGoogle", () => {
-  it("passes through coordinates without normalization", () => {
+  it("denormalizes 0-1000 coordinates to pixels", () => {
     const action = decoder.fromGoogle({
       name: "computer_use",
       args: { action: "click", x: 500, y: 500, button: "left" },
-    });
+    }, viewport);
     expect(action.type).toBe("click");
     if (action.type === "click") {
-      expect(action.x).toBe(500); // No normalization for Google
-      expect(action.y).toBe(500);
+      expect(action.x).toBe(640); // 500/1000 * 1280
+      expect(action.y).toBe(360); // 500/1000 * 720
     }
   });
 
@@ -79,30 +79,30 @@ describe("ActionDecoder.fromGoogle", () => {
     const action = decoder.fromGoogle({
       name: "computer_use",
       args: { action: "navigate", url: "https://example.com" },
-    });
+    }, viewport);
     expect(action.type).toBe("goto");
     if (action.type === "goto") expect(action.url).toBe("https://example.com");
   });
 
   it("falls back to screenshot for unknown action", () => {
-    const action = decoder.fromGoogle({ name: "unknown", args: { action: "unknown" } });
+    const action = decoder.fromGoogle({ name: "unknown", args: { action: "unknown" } }, viewport);
     expect(action.type).toBe("screenshot");
   });
 });
 
 describe("ActionDecoder.fromGeneric", () => {
-  it("decodes click", () => {
-    const action = decoder.fromGeneric({ name: "click", input: { x: 250, y: 750, button: "right" } });
+  it("decodes click and denormalizes coordinates", () => {
+    const action = decoder.fromGeneric({ name: "click", input: { x: 250, y: 750, button: "right" } }, viewport);
     expect(action.type).toBe("click");
     if (action.type === "click") {
-      expect(action.x).toBe(250);
-      expect(action.y).toBe(750);
+      expect(action.x).toBe(320);  // 250/1000 * 1280
+      expect(action.y).toBe(540);  // 750/1000 * 720
       expect(action.button).toBe("right");
     }
   });
 
   it("decodes terminate", () => {
-    const action = decoder.fromGeneric({ name: "terminate", input: { status: "success", result: "Done!" } });
+    const action = decoder.fromGeneric({ name: "terminate", input: { status: "success", result: "Done!" } }, viewport);
     expect(action.type).toBe("terminate");
     if (action.type === "terminate") {
       expect(action.status).toBe("success");
@@ -111,7 +111,7 @@ describe("ActionDecoder.fromGeneric", () => {
   });
 
   it("falls back to screenshot for unknown name", () => {
-    const action = decoder.fromGeneric({ name: "unknownFn", input: {} });
+    const action = decoder.fromGeneric({ name: "unknownFn", input: {} }, viewport);
     expect(action.type).toBe("screenshot");
   });
 });

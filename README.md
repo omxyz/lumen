@@ -18,7 +18,7 @@ Lumen is a clean, production-grade redesign of the CUA path in Stagehand V3 — 
 - [Session Resumption](#session-resumption)
 - [Policy & Safety](#policy--safety)
 - [Testing](#testing)
-- [Evals](#evals)
+- [Benchmarks](#benchmarks)
 - [Scripts](#scripts)
 - [Architecture](#architecture)
 - [Troubleshooting](#troubleshooting)
@@ -30,12 +30,16 @@ Lumen is a clean, production-grade redesign of the CUA path in Stagehand V3 — 
 - **Vision-only loop** — screenshot → model → action(s) → screenshot. No DOM scraping, no selectors.
 - **Multi-provider** — Anthropic (Claude), Google (Gemini), OpenAI (`computer-use-preview`), and any OpenAI-compatible chat endpoint.
 - **Principled history compression** — tier-1 screenshot compression (keeps the last N frames) + tier-2 LLM summarization at 80% context utilization. Achieves 32% fewer tokens than Stagehand V3 in benchmarks.
-- **Unified coordinate model** — all model-space coords are normalized 0–1000. Denormalization to pixels happens exactly once, in `ActionRouter`, so adapters never touch raw pixel values.
+- **Unified coordinate model** — each model provider emits coordinates in its own format (Anthropic/OpenAI pixels, Google 0–1000). `ActionDecoder` converts all coordinates to viewport pixels at decode time. `ActionRouter` dispatches pixel coords directly to the browser.
 - **Persistent within-session memory** — the `writeState` action persists structured JSON that survives history compaction via `StateStore`.
 - **Streaming events** — `agent.stream()` yields a typed `CUAEvent` async iterable for real-time UI.
 - **Session resumption** — serialize to JSON, restore later with `Agent.resume()`.
 - **Safety hooks** — `SessionPolicy` (domain allowlist/blocklist, action-type filter) and a `PreActionHook` for imperative deny logic.
 - **Completion gates** — plug in a `CompletionGate` to verify the task is actually done before the loop exits.
+- **Repeat detection** — three-layer detection (exact action, action category, URL stall) with escalating nudges that help the model self-correct when stuck.
+- **Action caching** — optional on-disk action cache for replaying known-good actions on repeated runs.
+- **Granular debug logging** — `LumenLogger` with per-surface env vars (`LUMEN_LOG_CDP`, `LUMEN_LOG_ACTIONS`, etc.) for surgical debugging.
+- **Form state extraction** — after form-related actions, Lumen extracts visible input values via CDP and feeds them back to the model.
 - **Child loop delegation** — the model can delegate a sub-task to a fresh loop via the `delegate` action.
 
 ---
@@ -238,7 +242,7 @@ interface AgentOptions {
   // Safety
   policy?: SessionPolicyOptions;
   preActionHook?: PreActionHook;
-  completionGate?: CompletionGate;
+  completionGate?: Verifier;
 
   // Timing overrides (milliseconds)
   timing?: {
@@ -248,9 +252,22 @@ interface AgentOptions {
     afterNavigation?: number;  // Default: 1000
   };
 
+  // Action cache
+  cacheDir?: string;              // Directory for action cache. Default: disabled
+
   // Session resumption
   initialHistory?: SerializedHistory;
   initialState?: TaskState;
+}
+```
+
+### RunOptions
+
+```typescript
+interface RunOptions {
+  instruction: string;
+  maxSteps?: number;                   // Override AgentOptions.maxSteps for this run
+  startUrl?: string;                   // Navigate here before first model step. Saves 1-2 steps.
 }
 ```
 
@@ -305,7 +322,7 @@ await agent.close();
 | `state_written` | `step`, `data: TaskState` |
 | `compaction` | `step`, `tokensBefore`, `tokensAfter` |
 | `termination_rejected` | `step`, `reason` |
-| `done` | `result: AgentResult` |
+| `done` | `result: CUAResult` |
 
 ---
 
@@ -400,6 +417,18 @@ const gate = new CustomGate(
 );
 ```
 
+```typescript
+// Model-based: use the model itself to verify completion from the screenshot
+import { Agent, ModelVerifier, AnthropicAdapter } from "@omlabs/lumen";
+
+const verifierAdapter = new AnthropicAdapter("claude-haiku-4-5-20251001", process.env.ANTHROPIC_API_KEY);
+const agent = new Agent({
+  model: "anthropic/claude-sonnet-4-6",
+  browser: { type: "local" },
+  completionGate: new ModelVerifier(verifierAdapter, "Complete the checkout flow", 2),
+});
+```
+
 If the gate fails, the termination is rejected and fed back to the model as an error, giving it a chance to recover.
 
 ---
@@ -422,15 +451,16 @@ npm run typecheck
 ```
 tests/
 ├── unit/
-│   ├── facts.test.ts          # FactStore
 │   ├── state.test.ts          # StateStore
 │   ├── policy.test.ts         # SessionPolicy domain matching
-│   ├── gate.test.ts           # CompletionGate
+│   ├── gate.test.ts           # CompletionGate / Verifier
 │   ├── normalize.test.ts      # Coordinate helpers
 │   ├── decoder.test.ts        # ActionDecoder
 │   ├── history.test.ts        # HistoryManager compression
 │   ├── history-toolids.test.ts# Tool call ID correlation
 │   ├── router.test.ts         # ActionRouter
+│   ├── action-cache.test.ts   # ActionCache
+│   ├── repeat-detector.test.ts# RepeatDetector
 │   └── streaming-monitor.test.ts
 ├── integration/
 │   ├── mock-tab.ts            # In-memory BrowserTab implementation
@@ -443,33 +473,29 @@ tests/
 │   ├── writestate.test.ts
 │   ├── options.test.ts
 │   ├── compaction.test.ts
+│   ├── repeat-detector.test.ts
 │   └── live-challenges.test.ts
-└── evals/
-    ├── runner.ts              # Eval harness
-    ├── scoring.ts             # Scoring utilities
-    ├── compare.ts             # Lumen vs Stagehand token comparison
-    └── tasks/
-        ├── hacker_news.eval.ts
-        ├── all_recipes.eval.ts
-        ├── amazon_shoes.eval.ts
-        └── google_flights.eval.ts
+└── evals/ → evals/benchmark/
 ```
 
 ---
 
-## Evals
+## Benchmarks
 
-Evals measure real-task performance against live websites with actual model calls. They require API keys.
+Benchmarks measure real-task performance against live websites with actual model calls across multiple frameworks (Lumen vs Stagehand vs browser-use). They require API keys.
 
 ```bash
-# All 4 tasks, both adapters (Lumen + Stagehand baseline)
-ANTHROPIC_API_KEY=sk-... npm run eval
+# All benchmark tasks, all frameworks
+ANTHROPIC_API_KEY=sk-... npm run benchmark
 
-# Single task
-npm run eval:quick         # wikipedia_shannon only
+# Lumen only
+npm run benchmark:lumen
 
-# Lumen adapter only (skip Stagehand comparison)
-npm run eval:lumen
+# Stagehand only
+npm run benchmark:stagehand
+
+# browser-use only
+npm run benchmark:browser-use
 ```
 
 Eval results (claude-sonnet-4-6, March 2026):
@@ -496,10 +522,11 @@ The token savings are quadratic in task length: long tasks (20+ steps) routinely
 | `npm run typecheck` | Type-check everything including tests |
 | `npm run lint` | ESLint |
 | `npm run format` | Prettier |
-| `npm run test:live` | Run `run-test.ts` against a real browser (requires API key) |
-| `npm run eval` | Run all evals against live websites |
-| `npm run eval:quick` | Run the fast single-task eval |
-| `npm run eval:lumen` | Eval Lumen adapter only (no Stagehand baseline) |
+| `npm run benchmark` | Run all benchmark tasks |
+| `npm run benchmark:lumen` | Benchmark Lumen only |
+| `npm run benchmark:stagehand` | Benchmark Stagehand only |
+| `npm run benchmark:browser-use` | Benchmark browser-use only |
+| `npm run benchmark:setup` | Set up benchmark dependencies |
 
 ---
 
@@ -508,6 +535,8 @@ The token savings are quadratic in task length: long tasks (20+ steps) routinely
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for an in-depth breakdown of every layer.
 
 See [docs/HAPPY_PATH.md](docs/HAPPY_PATH.md) for annotated walkthroughs of common usage patterns.
+
+See [docs/COMPARISON.md](docs/COMPARISON.md) for a technical comparison with Stagehand, browser-use, Skyvern, and Magnitude.
 
 ---
 

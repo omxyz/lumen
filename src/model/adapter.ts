@@ -1,5 +1,32 @@
 import type { CUAAction, ScreenshotResult, TaskState, TokenUsage, ViewportSize, WireMessage } from "../types.js";
 
+// ─── Retry utility ───────────────────────────────────────────────────────────
+
+function retrySleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isRetryable(e: unknown): boolean {
+  if (e instanceof Error) {
+    const msg = e.message;
+    return msg.includes("429") || msg.includes("529") || msg.includes("overloaded") ||
+           msg.includes("500") || msg.includes("503");
+  }
+  const status = (e as { status?: number }).status;
+  return status === 429 || status === 500 || status === 503 || status === 529;
+}
+
+export async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  for (let i = 0; i < attempts; i++) {
+    try { return await fn(); }
+    catch (e) {
+      if (i === attempts - 1 || !isRetryable(e)) throw e;
+      await retrySleep(1000 * 2 ** i);
+    }
+  }
+  throw new Error("unreachable");
+}
+
 export interface StepContext {
   screenshot: ScreenshotResult;
   wireHistory: WireMessage[];

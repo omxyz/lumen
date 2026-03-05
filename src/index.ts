@@ -64,14 +64,16 @@ export type { PerceptionLoopOptions } from "./loop/perception.js";
 export { ChildLoop } from "./loop/child.js";
 export type { ChildLoopOptions, ChildLoopResult } from "./loop/child.js";
 export { runPlanner } from "./loop/planner.js";
+export { RepeatDetector } from "./loop/repeat-detector.js";
+export { ActionCache } from "./loop/action-cache.js";
 
 // Policy
 export { SessionPolicy } from "./loop/policy.js";
 export type { SessionPolicyOptions, SessionPolicyResult } from "./loop/policy.js";
 
-// Completion gates
-export { UrlMatchesGate, CustomGate } from "./loop/gate.js";
-export type { CompletionGate, GateResult } from "./loop/gate.js";
+// Verifiers (completion gates)
+export { UrlMatchesGate, CustomGate, ModelVerifier } from "./loop/gate.js";
+export type { Verifier, CompletionGate, GateResult } from "./loop/gate.js";
 
 // Monitors
 export { ConsoleMonitor, NoopMonitor } from "./loop/monitor.js";

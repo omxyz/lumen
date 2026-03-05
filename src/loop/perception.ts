@@ -1,7 +1,7 @@
 import type { BrowserTab } from "../browser/tab.js";
 import type { ModelAdapter, ModelResponse, StepContext } from "../model/adapter.js";
 import type { ActionExecution, CUAAction, LoopOptions, LoopResult, PreActionHook, SemanticStep, TokenUsage } from "../types.js";
-import type { CompletionGate } from "./gate.js";
+import type { Verifier } from "./gate.js";
 import type { LoopMonitor } from "./monitor.js";
 import { ConsoleMonitor } from "./monitor.js";
 import { StateStore } from "./state.js";
@@ -9,6 +9,8 @@ import { HistoryManager } from "./history.js";
 import { ActionRouter, type RouterTiming } from "./router.js";
 import type { SessionPolicy } from "./policy.js";
 import { LumenLogger } from "../logger.js";
+import { RepeatDetector, nudgeMessage } from "./repeat-detector.js";
+import { ActionCache, screenshotHash } from "./action-cache.js";
 
 const CUA_TOOLS: CUAAction["type"][] = [
   "click", "doubleClick", "drag", "scroll",
@@ -23,7 +25,7 @@ export interface PerceptionLoopOptions {
   history: HistoryManager;
   state: StateStore;
   policy?: SessionPolicy;
-  gate?: CompletionGate;
+  gate?: Verifier;
   monitor?: LoopMonitor;
   timing?: RouterTiming;
   /** Optional hook called before every action. Return deny to block with reason. */
@@ -36,6 +38,8 @@ export interface PerceptionLoopOptions {
   compactionAdapter?: ModelAdapter;
   /** Granular debug logger. */
   log?: LumenLogger;
+  /** Enable action caching. Pass a directory path to enable, or omit to disable. */
+  cacheDir?: string;
 }
 
 export class PerceptionLoop {
@@ -44,7 +48,7 @@ export class PerceptionLoop {
   private readonly history: HistoryManager;
   private readonly state: StateStore;
   private readonly policy?: SessionPolicy;
-  private readonly gate?: CompletionGate;
+  private readonly gate?: Verifier;
   private readonly monitor: LoopMonitor;
   private readonly router: ActionRouter;
   private readonly preActionHook?: PreActionHook;
@@ -52,6 +56,8 @@ export class PerceptionLoop {
   private readonly cursorOverlay: boolean;
   private readonly compactionAdapter: ModelAdapter;
   private readonly log: LumenLogger;
+  private readonly repeatDetector = new RepeatDetector();
+  private readonly actionCache: ActionCache | null;
 
   constructor(opts: PerceptionLoopOptions) {
     this.tab = opts.tab;
@@ -67,10 +73,14 @@ export class PerceptionLoop {
     this.compactionAdapter = opts.compactionAdapter ?? opts.adapter;
     this.log = opts.log ?? LumenLogger.NOOP;
     this.router = new ActionRouter(opts.timing, this.log);
+    this.actionCache = opts.cacheDir ? new ActionCache(opts.cacheDir) : null;
   }
 
   async run(options: LoopOptions): Promise<LoopResult> {
     const threshold = options.compactionThreshold ?? 0.8;
+    let pendingNudge: string | undefined;
+    let nudgeSource: "action" | "url" | undefined; // Track nudge origin for clearing logic
+    let lastNormalizedUrl = ""; // Track URL for clearing URL nudges
 
     for (let step = 0; step < options.maxSteps; step++) {
       // ── Step start ──────────────────────────────────────────────────────────
@@ -109,14 +119,40 @@ export class PerceptionLoop {
         );
       }
 
+      // 1b. URL stall detection — too many steps on the same URL
+      //     Also clear URL nudges when the page actually changes (SPA fix).
+      const currentNormalized = normalizeUrlForStall(this.tab.url());
+      if (nudgeSource === "url" && currentNormalized !== lastNormalizedUrl) {
+        // Agent navigated away — clear the URL nudge
+        pendingNudge = undefined;
+        nudgeSource = undefined;
+      }
+      lastNormalizedUrl = currentNormalized;
+
+      // Always call recordUrl so the stall counter keeps incrementing (for escalation 5→8→12).
+      const urlStall = this.repeatDetector.recordUrl(this.tab.url());
+      if (urlStall !== null) {
+        this.log.loop(`step ${step + 1}: URL stall detected at level ${urlStall} (url=${this.tab.url()})`);
+        pendingNudge = nudgeMessage(urlStall, "url");
+        nudgeSource = "url";
+      }
+
       // 2. Screenshot (with cursor overlay at last click position if enabled)
       const screenshot = await this.tab.screenshot({ cursorOverlay: this.cursorOverlay });
+      const currentScreenshotHash = this.actionCache ? screenshotHash(screenshot.data) : undefined;
 
       // 2b. Store screenshot in wire history so the model sees its full visual navigation trail.
       //     This is the "after" state of the previous step's actions (or the initial page for step 0).
       this.history.appendScreenshot(screenshot.data.toString("base64"), step);
 
       // 3. Build step context — state re-injected every step regardless of compaction
+      //    If repeat detector flagged a nudge, prepend it to the system prompt for this step.
+      //    Nudges are STICKY — they persist until the model takes a productive action
+      //    (click, goto, writeState, terminate) rather than clearing every step.
+      const stepSystemPrompt = pendingNudge
+        ? `${pendingNudge}\n\n${options.systemPrompt ?? ""}`
+        : options.systemPrompt;
+
       const context: StepContext = {
         screenshot,
         wireHistory: this.history.wireHistory(),
@@ -124,7 +160,7 @@ export class PerceptionLoop {
         stepIndex: step,
         maxSteps: options.maxSteps,
         url: this.tab.url(),
-        systemPrompt: options.systemPrompt,
+        systemPrompt: stepSystemPrompt,
       };
 
       this.monitor.stepStarted(step, context);
@@ -240,6 +276,69 @@ export class PerceptionLoop {
         this.monitor.actionExecuted(step, action, outcome);
         stepActions.push({ action, outcome: { ok: outcome.ok, error: outcome.error } });
         bufferedOutcomes.push({ action, wireOutcome: { ok: outcome.ok, error: outcome.error } });
+
+        // 5e-clear. Clear nudge based on its source:
+        //   - Action nudges: clear on any productive action (click, goto, writeState, etc.)
+        //   - URL nudges: only clear when the URL actually changes (checked at step start above).
+        //     On SPAs, clicks don't mean the agent left the page, so clicks must NOT clear URL nudges.
+        //     Only goto/writeState/terminate indicate real progress on a stalled page.
+        if (pendingNudge && nudgeSource === "action" && isProductiveAction(action)) {
+          pendingNudge = undefined;
+          nudgeSource = undefined;
+        } else if (pendingNudge && nudgeSource === "url" && isUrlEscapeAction(action)) {
+          pendingNudge = undefined;
+          nudgeSource = undefined;
+        }
+
+        // 5f. Repeat detection — record after execution, stash nudge for next step
+        const repeatLevel = this.repeatDetector.record(action);
+        if (repeatLevel !== null) {
+          this.log.loop(`step ${step + 1}: repeat detected at level ${repeatLevel}`);
+          pendingNudge = nudgeMessage(repeatLevel);
+          nudgeSource = "action";
+        }
+
+        // 5g. Action cache — store successful actions for replay on future runs
+        if (this.actionCache && outcome.ok && options.instructionHash) {
+          const key = this.actionCache.cacheKey(action.type, this.tab.url(), options.instructionHash);
+          this.actionCache.set(key, action, this.tab.url(), options.instructionHash, currentScreenshotHash).catch(() => {
+            // Cache write failures are non-fatal
+          });
+        }
+      }
+
+      // 5h. Form state extraction — after form-related actions, extract input values via CDP
+      //      and inject as a nudge for the next step. This gives the model explicit text feedback
+      //      about what values are actually set in form fields (dates, filters, text inputs).
+      const hadFormAction = bufferedOutcomes.some(({ action: a }) =>
+        a.type === "click" || a.type === "doubleClick" || a.type === "type",
+      );
+      if (hadFormAction && !terminated) {
+        try {
+          const formState = await this.tab.evaluate<string>(`
+            (() => {
+              const fields = [];
+              const inputs = document.querySelectorAll('input:not([type="hidden"]), select, textarea');
+              for (const el of inputs) {
+                if (!el.offsetParent && el.tagName !== 'INPUT') continue;
+                const label = el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('name') || el.id || '';
+                if (!label) continue;
+                const val = el.tagName === 'SELECT' ? el.options[el.selectedIndex]?.text : el.value;
+                if (val) fields.push(label.slice(0, 30) + ': ' + val.slice(0, 50));
+              }
+              return fields.length > 0 ? fields.slice(0, 8).join(' | ') : '';
+            })()
+          `);
+          if (formState && formState.length > 5) {
+            // Only inject if we don't already have a more important nudge (repeat/stall)
+            if (!pendingNudge) {
+              pendingNudge = `FORM STATE: ${formState}\nVerify these values match your intent. If a date or filter is wrong, correct it before proceeding.`;
+              nudgeSource = "action"; // Clear on next productive action
+            }
+          }
+        } catch {
+          // CDP evaluation can fail on some pages (cross-origin, crashed context)
+        }
       }
 
       // 6. After stream: record assistant turn FIRST (correct wire order), then tool results.
@@ -273,6 +372,14 @@ export class PerceptionLoop {
           if (!streamResponse.toolCallIds) streamResponse.toolCallIds = [];
           streamResponse.toolCallIds.push(noopId);
           bufferedOutcomes.push({ action: noopAction, wireOutcome: { ok: true } });
+
+          // Record noop in repeat detector — noops were previously invisible
+          const noopRepeat = this.repeatDetector.record(noopAction);
+          if (noopRepeat !== null) {
+            this.log.loop(`step ${step + 1}: noop repeat detected at level ${noopRepeat}`);
+            pendingNudge = nudgeMessage(noopRepeat);
+            nudgeSource = "action";
+          }
         }
         this.history.appendResponse(streamResponse);
         stepUsage = streamResponse.usage;
@@ -316,12 +423,21 @@ export class PerceptionLoop {
       }
     }
 
+    // Extract best answer from agentState if available (model may have saved progress via update_state)
+    let maxStepsResult = "Maximum steps reached without completion";
+    const finalState = this.state.current();
+    if (finalState && Object.keys(finalState).length > 0) {
+      maxStepsResult = Object.entries(finalState)
+        .map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`)
+        .join("; ");
+    }
+
     const result: LoopResult = {
       status: "maxSteps",
-      result: "Maximum steps reached without completion",
+      result: maxStepsResult,
       steps: options.maxSteps,
       history: this.history.semanticHistory(),
-      agentState: this.state.current(),
+      agentState: finalState,
     };
     this.monitor.terminated(result);
     return result;
@@ -330,3 +446,44 @@ export class PerceptionLoop {
 
 // suppress unused import warning — CUA_TOOLS used as documentation
 void CUA_TOOLS;
+
+/** Returns true for actions that indicate the agent is making progress, not stalling. */
+function isProductiveAction(action: CUAAction): boolean {
+  switch (action.type) {
+    case "click":
+    case "doubleClick":
+    case "goto":
+    case "writeState":
+    case "terminate":
+    case "type":
+    case "delegate":
+      return true;
+    default:
+      return false;
+  }
+}
+
+/** Returns true for actions that can clear a URL stall nudge.
+ *  On SPAs, clicks don't navigate away. And goto to the same page is just a reload.
+ *  Only writeState (agent saved progress) or terminate (agent completed) indicate
+ *  the agent actually responded to the nudge. Goto to a DIFFERENT page is handled
+ *  by the URL change check at step start, not here. */
+function isUrlEscapeAction(action: CUAAction): boolean {
+  switch (action.type) {
+    case "writeState":
+    case "terminate":
+      return true;
+    default:
+      return false;
+  }
+}
+
+/** Normalize URL to origin+pathname for stall comparison (mirrors RepeatDetector). */
+function normalizeUrlForStall(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.origin + u.pathname;
+  } catch {
+    return url;
+  }
+}

@@ -1,12 +1,11 @@
 import type { CUAAction, TaskState, ViewportSize } from "../types.js";
-// TaskState used for writeState decoding
-import { normalize } from "./adapter.js";
+import { denormalize } from "./adapter.js";
 
 export class ActionDecoder {
-  /** Anthropic tool_use block → CUAAction. Coordinates are pixels → normalize to 0-1000. */
+  /** Anthropic tool_use block → CUAAction. Coordinates are pixels — pass through directly. */
   fromAnthropic(
     block: { name: string; input: Record<string, unknown> },
-    viewport: ViewportSize,
+    _viewport: ViewportSize,
   ): CUAAction {
     const { name, input } = block;
 
@@ -19,17 +18,17 @@ export class ActionDecoder {
       if (action === "left_click" || action === "right_click" || action === "middle_click") {
         const [px, py] = input.coordinate as [number, number];
         const button = action === "right_click" ? "right" : action === "middle_click" ? "middle" : "left";
-        return { type: "click", x: normalize(px, viewport.width), y: normalize(py, viewport.height), button };
+        return { type: "click", x: px, y: py, button };
       }
 
       if (action === "double_click") {
         const [px, py] = input.coordinate as [number, number];
-        return { type: "doubleClick", x: normalize(px, viewport.width), y: normalize(py, viewport.height) };
+        return { type: "doubleClick", x: px, y: py };
       }
 
       if (action === "mouse_move") {
         const [px, py] = input.coordinate as [number, number];
-        return { type: "hover", x: normalize(px, viewport.width), y: normalize(py, viewport.height) };
+        return { type: "hover", x: px, y: py };
       }
 
       if (action === "left_click_drag") {
@@ -37,10 +36,10 @@ export class ActionDecoder {
         const [ex, ey] = input.coordinate as [number, number];
         return {
           type: "drag",
-          startX: normalize(sx, viewport.width),
-          startY: normalize(sy, viewport.height),
-          endX: normalize(ex, viewport.width),
-          endY: normalize(ey, viewport.height),
+          startX: sx,
+          startY: sy,
+          endX: ex,
+          endY: ey,
         };
       }
 
@@ -50,8 +49,8 @@ export class ActionDecoder {
         const amount = (input.amount as number) ?? 3;
         return {
           type: "scroll",
-          x: normalize(px, viewport.width),
-          y: normalize(py, viewport.height),
+          x: px,
+          y: py,
           direction: direction as "up" | "down" | "left" | "right",
           amount,
         };
@@ -76,8 +75,11 @@ export class ActionDecoder {
     return { type: "screenshot" };
   }
 
-  /** Google function_call → CUAAction. Coordinates are already 0-1000. */
-  fromGoogle(call: { name: string; args: Record<string, unknown> }): CUAAction {
+  /** Google function_call → CUAAction. Coordinates are 0-1000 → denormalize to pixels. */
+  fromGoogle(
+    call: { name: string; args: Record<string, unknown> },
+    viewport: ViewportSize,
+  ): CUAAction {
     const { name, args } = call;
 
     // Legacy computer_use tool (older Google models)
@@ -89,35 +91,43 @@ export class ActionDecoder {
       if (action === "click") {
         return {
           type: "click",
-          x: args.x as number,
-          y: args.y as number,
+          x: denormalize(args.x as number, viewport.width),
+          y: denormalize(args.y as number, viewport.height),
           button: (args.button as "left" | "right" | "middle") ?? "left",
         };
       }
 
       if (action === "double_click") {
-        return { type: "doubleClick", x: args.x as number, y: args.y as number };
+        return {
+          type: "doubleClick",
+          x: denormalize(args.x as number, viewport.width),
+          y: denormalize(args.y as number, viewport.height),
+        };
       }
 
       if (action === "hover" || action === "move") {
-        return { type: "hover", x: args.x as number, y: args.y as number };
+        return {
+          type: "hover",
+          x: denormalize(args.x as number, viewport.width),
+          y: denormalize(args.y as number, viewport.height),
+        };
       }
 
       if (action === "drag") {
         return {
           type: "drag",
-          startX: args.startX as number,
-          startY: args.startY as number,
-          endX: args.endX as number,
-          endY: args.endY as number,
+          startX: denormalize(args.startX as number, viewport.width),
+          startY: denormalize(args.startY as number, viewport.height),
+          endX: denormalize(args.endX as number, viewport.width),
+          endY: denormalize(args.endY as number, viewport.height),
         };
       }
 
       if (action === "scroll") {
         return {
           type: "scroll",
-          x: args.x as number,
-          y: args.y as number,
+          x: denormalize(args.x as number, viewport.width),
+          y: denormalize(args.y as number, viewport.height),
           direction: (args.direction as "up" | "down" | "left" | "right") ?? "down",
           amount: (args.amount as number) ?? 3,
         };
@@ -133,8 +143,8 @@ export class ActionDecoder {
     if (name === "click_at") {
       return {
         type: "click",
-        x: args.x as number,
-        y: args.y as number,
+        x: denormalize(args.x as number, viewport.width),
+        y: denormalize(args.y as number, viewport.height),
         button: (args.button as "left" | "right" | "middle") ?? "left",
       };
     }
@@ -155,8 +165,8 @@ export class ActionDecoder {
     if (name === "scroll_at" || name === "scroll") {
       return {
         type: "scroll",
-        x: (args.x as number) ?? 500,
-        y: (args.y as number) ?? 500,
+        x: denormalize((args.x as number) ?? 500, viewport.width),
+        y: denormalize((args.y as number) ?? 500, viewport.height),
         direction: (args.direction as "up" | "down" | "left" | "right") ?? "down",
         amount: (args.amount as number) ?? 3,
       };
@@ -189,10 +199,10 @@ export class ActionDecoder {
     return { type: "screenshot" };
   }
 
-  /** OpenAI computer_call → CUAAction. Coordinates are pixels → normalize to 0-1000. */
+  /** OpenAI computer_call → CUAAction. Coordinates are pixels — pass through directly. */
   fromOpenAI(
     call: { type: string; action?: Record<string, unknown> },
-    viewport: ViewportSize,
+    _viewport: ViewportSize,
   ): CUAAction {
     if (call.type !== "computer_call" || !call.action) return { type: "screenshot" };
     const action = call.action;
@@ -204,8 +214,8 @@ export class ActionDecoder {
       const button = (action.button as string) ?? "left";
       return {
         type: "click",
-        x: normalize(action.x as number, viewport.width),
-        y: normalize(action.y as number, viewport.height),
+        x: action.x as number,
+        y: action.y as number,
         button: button as "left" | "right" | "middle",
       };
     }
@@ -213,16 +223,16 @@ export class ActionDecoder {
     if (actionType === "double_click") {
       return {
         type: "doubleClick",
-        x: normalize(action.x as number, viewport.width),
-        y: normalize(action.y as number, viewport.height),
+        x: action.x as number,
+        y: action.y as number,
       };
     }
 
     if (actionType === "scroll") {
       return {
         type: "scroll",
-        x: normalize(action.x as number, viewport.width),
-        y: normalize(action.y as number, viewport.height),
+        x: action.x as number,
+        y: action.y as number,
         direction: (action.direction as "up" | "down" | "left" | "right") ?? "down",
         amount: (action.amount as number) ?? 3,
       };
@@ -234,25 +244,28 @@ export class ActionDecoder {
     return { type: "screenshot" };
   }
 
-  /** Generic function call → CUAAction. For CustomAdapter. */
-  fromGeneric(call: { name: string; input: Record<string, unknown> }): CUAAction {
+  /** Generic function call → CUAAction. Coordinates are 0-1000 → denormalize to pixels. */
+  fromGeneric(
+    call: { name: string; input: Record<string, unknown> },
+    viewport: ViewportSize,
+  ): CUAAction {
     const { name, input } = call;
 
     switch (name) {
       case "click":
-        return { type: "click", x: input.x as number, y: input.y as number, button: (input.button as "left" | "right" | "middle") ?? "left" };
+        return { type: "click", x: denormalize(input.x as number, viewport.width), y: denormalize(input.y as number, viewport.height), button: (input.button as "left" | "right" | "middle") ?? "left" };
       case "doubleClick":
-        return { type: "doubleClick", x: input.x as number, y: input.y as number };
+        return { type: "doubleClick", x: denormalize(input.x as number, viewport.width), y: denormalize(input.y as number, viewport.height) };
       case "hover":
-        return { type: "hover", x: input.x as number, y: input.y as number };
+        return { type: "hover", x: denormalize(input.x as number, viewport.width), y: denormalize(input.y as number, viewport.height) };
       case "drag":
-        return { type: "drag", startX: input.startX as number, startY: input.startY as number, endX: input.endX as number, endY: input.endY as number };
+        return { type: "drag", startX: denormalize(input.startX as number, viewport.width), startY: denormalize(input.startY as number, viewport.height), endX: denormalize(input.endX as number, viewport.width), endY: denormalize(input.endY as number, viewport.height) };
       case "type":
         return { type: "type", text: input.text as string };
       case "keyPress":
         return { type: "keyPress", keys: input.keys as string[] };
       case "scroll":
-        return { type: "scroll", x: input.x as number, y: input.y as number, direction: (input.direction as "up" | "down" | "left" | "right") ?? "down", amount: (input.amount as number) ?? 3 };
+        return { type: "scroll", x: denormalize(input.x as number, viewport.width), y: denormalize(input.y as number, viewport.height), direction: (input.direction as "up" | "down" | "left" | "right") ?? "down", amount: (input.amount as number) ?? 3 };
       case "goto":
         return { type: "goto", url: input.url as string };
       case "writeState":

@@ -215,12 +215,13 @@ export class CustomAdapter implements ModelAdapter {
     });
 
     const actions: CUAAction[] = [];
+    const customViewport = { width: context.screenshot.width, height: context.screenshot.height };
     const choice = response.choices[0];
     if (choice?.message?.tool_calls) {
       for (const toolCall of choice.message.tool_calls) {
         try {
           const input = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
-          actions.push(decoder.fromGeneric({ name: toolCall.function.name, input }));
+          actions.push(decoder.fromGeneric({ name: toolCall.function.name, input }, customViewport));
         } catch {
           actions.push({ type: "screenshot" });
         }

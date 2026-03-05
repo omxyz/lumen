@@ -14,6 +14,66 @@ const MOD_CTRL  = 2;
 const MOD_META  = 4;
 const MOD_SHIFT = 8;
 
+// Full CDP key properties for special keys
+interface KeyProps {
+  key: string;
+  code: string;
+  keyCode: number;   // windowsVirtualKeyCode
+  text?: string;
+}
+
+const SPECIAL_KEYS: Record<string, KeyProps> = {
+  "return":     { key: "Enter",     code: "Enter",       keyCode: 13, text: "\r" },
+  "enter":      { key: "Enter",     code: "Enter",       keyCode: 13, text: "\r" },
+  "tab":        { key: "Tab",       code: "Tab",         keyCode: 9,  text: "\t" },
+  "backspace":  { key: "Backspace", code: "Backspace",   keyCode: 8 },
+  "delete":     { key: "Delete",    code: "Delete",      keyCode: 46 },
+  "escape":     { key: "Escape",    code: "Escape",      keyCode: 27 },
+  "esc":        { key: "Escape",    code: "Escape",      keyCode: 27 },
+  "space":      { key: " ",         code: "Space",       keyCode: 32, text: " " },
+  "arrowup":    { key: "ArrowUp",   code: "ArrowUp",     keyCode: 38 },
+  "arrowdown":  { key: "ArrowDown", code: "ArrowDown",   keyCode: 40 },
+  "arrowleft":  { key: "ArrowLeft", code: "ArrowLeft",   keyCode: 37 },
+  "arrowright": { key: "ArrowRight",code: "ArrowRight",  keyCode: 39 },
+  "home":       { key: "Home",      code: "Home",        keyCode: 36 },
+  "end":        { key: "End",       code: "End",         keyCode: 35 },
+  "pageup":     { key: "PageUp",    code: "PageUp",      keyCode: 33 },
+  "pagedown":   { key: "PageDown",  code: "PageDown",    keyCode: 34 },
+  "insert":     { key: "Insert",    code: "Insert",      keyCode: 45 },
+  // F-keys
+  "f1":  { key: "F1",  code: "F1",  keyCode: 112 },
+  "f2":  { key: "F2",  code: "F2",  keyCode: 113 },
+  "f3":  { key: "F3",  code: "F3",  keyCode: 114 },
+  "f4":  { key: "F4",  code: "F4",  keyCode: 115 },
+  "f5":  { key: "F5",  code: "F5",  keyCode: 116 },
+  "f6":  { key: "F6",  code: "F6",  keyCode: 117 },
+  "f7":  { key: "F7",  code: "F7",  keyCode: 118 },
+  "f8":  { key: "F8",  code: "F8",  keyCode: 119 },
+  "f9":  { key: "F9",  code: "F9",  keyCode: 120 },
+  "f10": { key: "F10", code: "F10", keyCode: 121 },
+  "f11": { key: "F11", code: "F11", keyCode: 122 },
+  "f12": { key: "F12", code: "F12", keyCode: 123 },
+};
+
+/** Resolve full CDP key properties for a key name. */
+function resolveKeyProps(keyName: string): KeyProps {
+  const lower = keyName.toLowerCase();
+  const special = SPECIAL_KEYS[lower];
+  if (special) return special;
+
+  // Single character — derive code and VK from the character
+  if (keyName.length === 1) {
+    const ch = keyName;
+    const code = charToCode(ch);
+    const upper = ch.toUpperCase();
+    const vk = upper.charCodeAt(0); // VK for letters/digits is the uppercase ASCII code
+    return { key: ch, code, keyCode: vk, text: ch };
+  }
+
+  // Unknown key — pass through as-is
+  return { key: keyName, code: keyName, keyCode: 0 };
+}
+
 // Map key names to CDP modifier flags
 function modifierFlag(key: string): number {
   const k = key.toLowerCase();
@@ -22,6 +82,22 @@ function modifierFlag(key: string): number {
   if (k === "meta" || k === "command" || k === "cmd") return MOD_META;
   if (k === "shift") return MOD_SHIFT;
   return 0;
+}
+
+/** Map a single character to its KeyboardEvent.code value. */
+function charToCode(ch: string): string {
+  if (ch >= "a" && ch <= "z") return `Key${ch.toUpperCase()}`;
+  if (ch >= "A" && ch <= "Z") return `Key${ch}`;
+  if (ch >= "0" && ch <= "9") return `Digit${ch}`;
+  if (ch === " ") return "Space";
+  if (ch === "\n" || ch === "\r") return "Enter";
+  if (ch === "\t") return "Tab";
+  const punct: Record<string, string> = {
+    "-": "Minus", "=": "Equal", "[": "BracketLeft", "]": "BracketRight",
+    "\\": "Backslash", ";": "Semicolon", "'": "Quote", "`": "Backquote",
+    ",": "Comma", ".": "Period", "/": "Slash",
+  };
+  return punct[ch] ?? "";
 }
 
 export class CDPTab implements BrowserTab {
@@ -218,7 +294,7 @@ export class CDPTab implements BrowserTab {
     }
   }
 
-  async type(text: string, _options: TypeOptions = {}): Promise<ActionOutcome> {
+  async type(text: string, options: TypeOptions = {}): Promise<ActionOutcome> {
     try {
       // In URL bar mode, capture text into the URL buffer instead of sending to the page.
       // Models often append "\n" to the URL when typing (treating newline as Enter).
@@ -241,7 +317,38 @@ export class CDPTab implements BrowserTab {
       }
       const preview = text.slice(0, 40);
       this.log.browser(`type: "${preview}${text.length > 40 ? "..." : ""}" (${text.length} chars)`);
-      await this.session.send("Input.insertText", { text });
+      const delayMs = options.delayMs ?? 0;
+      // Dispatch individual keyDown/keyUp events per character — matches how Playwright
+      // and Stagehand do it. This fires the full DOM event sequence (keydown, input, keyup)
+      // that React and other frameworks rely on for controlled inputs.
+      for (const ch of text) {
+        const key = ch;
+        const code = charToCode(ch);
+        const windowsVirtualKeyCode = ch.charCodeAt(0);
+        await this.session.send("Input.dispatchKeyEvent", {
+          type: "keyDown",
+          key,
+          code,
+          windowsVirtualKeyCode,
+        });
+        // char event carries the text — fires beforeinput/input in React
+        // (keyDown identifies the key, char inserts the character)
+        await this.session.send("Input.dispatchKeyEvent", {
+          type: "char",
+          key: ch,
+          code,
+          text: ch,
+          unmodifiedText: ch,
+          windowsVirtualKeyCode,
+        });
+        await this.session.send("Input.dispatchKeyEvent", {
+          type: "keyUp",
+          key,
+          code,
+          windowsVirtualKeyCode,
+        });
+        if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
+      }
       return { ok: true };
     } catch (err) {
       this.log.browser(`type FAILED: ${err}`, { error: String(err) });
@@ -296,16 +403,40 @@ export class CDPTab implements BrowserTab {
       const mainKeys = keys.filter((k) => modifierFlag(k) === 0);
       const modBits = modKeys.reduce((acc, k) => acc | modifierFlag(k), 0);
 
-      // Press modifiers down first, then main keys with modifier bits, then release all
+      // Press modifiers down first, then main keys with full properties, then release all
       for (const mk of modKeys) {
-        await this.session.send("Input.dispatchKeyEvent", { type: "keyDown", key: mk, modifiers: modBits });
+        const props = resolveKeyProps(mk);
+        await this.session.send("Input.dispatchKeyEvent", {
+          type: "keyDown", key: props.key, code: props.code,
+          windowsVirtualKeyCode: props.keyCode, modifiers: modBits,
+        });
       }
       for (const mk of mainKeys) {
-        await this.session.send("Input.dispatchKeyEvent", { type: "keyDown", key: mk, modifiers: modBits });
-        await this.session.send("Input.dispatchKeyEvent", { type: "keyUp",   key: mk, modifiers: modBits });
+        const props = resolveKeyProps(mk);
+        await this.session.send("Input.dispatchKeyEvent", {
+          type: "keyDown", key: props.key, code: props.code,
+          windowsVirtualKeyCode: props.keyCode, modifiers: modBits,
+          ...(props.text ? { text: props.text, unmodifiedText: props.text } : {}),
+        });
+        // char event for keys that produce text (fires beforeinput/input in React)
+        if (props.text) {
+          await this.session.send("Input.dispatchKeyEvent", {
+            type: "char", key: props.key, code: props.code,
+            text: props.text, unmodifiedText: props.text,
+            windowsVirtualKeyCode: props.keyCode, modifiers: modBits,
+          });
+        }
+        await this.session.send("Input.dispatchKeyEvent", {
+          type: "keyUp", key: props.key, code: props.code,
+          windowsVirtualKeyCode: props.keyCode, modifiers: modBits,
+        });
       }
       for (const mk of [...modKeys].reverse()) {
-        await this.session.send("Input.dispatchKeyEvent", { type: "keyUp", key: mk, modifiers: 0 });
+        const props = resolveKeyProps(mk);
+        await this.session.send("Input.dispatchKeyEvent", {
+          type: "keyUp", key: props.key, code: props.code,
+          windowsVirtualKeyCode: props.keyCode, modifiers: 0,
+        });
       }
 
       return { ok: true };

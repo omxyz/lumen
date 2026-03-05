@@ -1,6 +1,6 @@
 import type { ModelAdapter } from "./model/adapter.js";
 import type { BrowserTab } from "./browser/tab.js";
-import type { CompletionGate } from "./loop/gate.js";
+import type { Verifier } from "./loop/gate.js";
 import type { LoopMonitor } from "./loop/monitor.js";
 import type { RouterTiming } from "./loop/router.js";
 import type { SessionPolicyOptions } from "./loop/policy.js";
@@ -284,10 +284,22 @@ export class Agent {
     if (this.options.plannerModel) {
       const screenshot = await this._tab!.screenshot();
       const { runPlanner } = await import("./loop/planner.js");
-      const plan = await runPlanner(options.instruction, screenshot, this._adapter!);
+      // Bug fix #1: actually use the plannerModel to create a separate adapter
+      const plannerAdapter = await createAdapter(
+        this.options.plannerModel,
+        this.options.apiKey,
+        this.options.baseURL,
+      );
+      const plan = await runPlanner(options.instruction, screenshot, plannerAdapter);
       // Re-create the session with the plan-enhanced system prompt for this run
       const plannerSystemPrompt = `${plan}\n\n${this.options.systemPrompt ?? ""}`.trim();
-      const monitor = await buildMonitor(this.options);
+      const [monitor, compactionAdapter] = await Promise.all([
+        buildMonitor(this.options),
+        this.options.compactionModel
+          ? createAdapter(this.options.compactionModel, this.options.apiKey, this.options.baseURL)
+          : Promise.resolve(undefined),
+      ]);
+      // Bug fix #2: inherit all session config from the original session
       const sessionWithPlan = new Session({
         tab: this._tab!,
         adapter: this._adapter!,
@@ -300,7 +312,11 @@ export class Agent {
         policy: this.options.policy,
         preActionHook: this.options.preActionHook,
         completionGate: this.options.completionGate,
+        compactionAdapter,
+        initialHistory: this._pendingHistory ?? this.options.initialHistory,
+        initialState: this.options.initialState,
         monitor,
+        log: this._log ?? undefined,
       });
       return sessionWithPlan.run(options);
     }

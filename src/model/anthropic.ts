@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { ModelAdapter, StepContext } from "./adapter.js";
 import type { ModelResponse } from "./adapter.js";
+import { withRetry } from "./adapter.js";
 import type { CUAAction, TaskState, WireMessage } from "../types.js";
 import { ActionDecoder } from "./decoder.js";
 
@@ -9,38 +10,57 @@ const decoder = new ActionDecoder();
 function buildSystemPrompt(context: StepContext): string {
   const parts: string[] = [];
   if (context.systemPrompt) parts.push(context.systemPrompt);
-  parts.push(`You are a computer use agent. Current URL: ${context.url || "(unknown)"}`);
-  parts.push(`Step ${context.stepIndex + 1} of ${context.maxSteps}`);
+  parts.push(`Current URL: ${context.url || "(unknown)"}`);
+  parts.push(`Step ${context.stepIndex + 1} of ${context.maxSteps}.`);
   parts.push(
-    "TOOLS AVAILABLE:\n" +
-    "- computer: click, scroll, type, press keys\n" +
-    "- navigate: go to a URL (use this instead of clicking the address bar)\n" +
-    "- update_state: persist any data you need across scrolls/pages. Call it with ALL data collected so far — it replaces the previous state entirely. Use for running best values, collected facts, page counts, etc.\n" +
-    "- task_complete: CALL THIS when you have the final answer\n\n" +
-    "CRITICAL RULES:\n" +
-    "1. NEVER call computer with action=screenshot — screenshots are provided automatically each step.\n" +
-    "2. When collecting data across scrolls or pages: after each scroll, call update_state with everything found so far. For min/max tasks: update_state({data: {min_price: '£3.49', min_title: 'Sharp Objects'}}). update_state REPLACES the previous state — always include the current best even if unchanged.\n" +
-    "3. Once you have processed ALL pages, call task_complete immediately. Do NOT go back to re-verify pages you already scrolled through — trust your recorded state.\n" +
-    "4. Call task_complete immediately once you have the complete answer. Do NOT keep browsing.",
+    "RULES:\n" +
+    "- Screenshots are automatic — never request one.\n" +
+    "- Use navigate for URLs.\n" +
+    "- TERMINATE IMMEDIATELY: If the answer is visible on screen, call task_complete RIGHT NOW. Do not scroll, click, or take any other action first.\n" +
+    "- Use search/filter features on sites instead of scrolling through all results.\n" +
+    "- If the page has a cookie/consent banner, dismiss it first, then proceed.\n" +
+    "- EFFICIENT SCROLLING: Use key Page_Down to scroll instead of small mouse scrolls — each press advances a full screen.\n" +
+    "- LIST VIEWS: When items in a list show visible values (prices, ratings, names), read them directly. Do NOT click into individual items to verify data already shown.\n" +
+    "- TRUST MEMORY: If you already recorded data from a page, do NOT go back to re-verify. Use what you have.\n" +
+    "- BE DECISIVE: Once you have sufficient information, call task_complete immediately. Do not keep browsing to double-check.\n" +
+    "- THINK FIRST: Before acting, briefly consider: What key information is visible? What have I accomplished? What is my next step?\n" +
+    "- CHECKPOINT PROGRESS: Call update_state every 3-5 steps to save your findings so far. Include ALL data collected — this persists even if history is compacted.\n" +
+    "- VERIFY ACTIONS: After any form interaction (date picker, dropdown, filter, checkbox), CHECK the next screenshot to confirm your selection was applied correctly. If the field shows a wrong value or the filter shows wrong results, try again with a different approach.\n" +
+    "- DATE PICKERS: 1) First try typing the date directly into the input field (common formats: MM/DD/YYYY, YYYY-MM-DD). 2) If using a calendar widget, navigate to the correct MONTH first using arrow buttons, then click the specific date. 3) After selecting, READ the date field value in the next screenshot to verify it matches your intent.\n" +
+    "- FORMS: Fill one field at a time. For dropdowns, click to open then click the exact option text. If an element doesn't respond to clicks, try Tab key to move between fields, or type directly into focused inputs.\n" +
+    "- URL FALLBACK: If form filling (especially date pickers or complex filters) fails after 2-3 attempts, construct the search URL with query parameters and navigate directly. Most sites encode search parameters in the URL (e.g. check-in/check-out dates, destinations, filters).\n" +
+    "- COMPLETE ALL SUB-TASKS: If the task asks for multiple pieces of information, track each one with update_state. Do NOT call task_complete until ALL requested items are found.\n" +
+    "- NEVER HALLUCINATE: Only report information you can see on screen. If a specific piece of data is not visible, say so rather than guessing.",
   );
   if (context.agentState && Object.keys(context.agentState).length > 0) {
-    parts.push(`Current state: ${JSON.stringify(context.agentState)}`);
+    parts.push(`State: ${JSON.stringify(context.agentState)}`);
   }
-  return parts.join("\n\n");
+  // Urgency warning when nearing step limit
+  const stepsRemaining = context.maxSteps - context.stepIndex - 1;
+  if (stepsRemaining <= Math.max(3, Math.floor(context.maxSteps * 0.1))) {
+    parts.push(
+      `⚠️ URGENT: Only ${stepsRemaining} step(s) remaining! You MUST call task_complete on your NEXT action with your best answer based on what you have found so far. Do NOT continue browsing.`,
+    );
+  }
+  return parts.join("\n");
 }
 
 function buildMessages(context: StepContext): Anthropic.MessageParam[] {
   const messages: Anthropic.MessageParam[] = [];
 
-  // All pending content for the next user message.
-  // Flushed as a single user turn whenever an assistant message is encountered.
-  // This correctly handles:
-  //   - screenshot entries (visual context for each step)
-  //   - tool_result entries (outcome of each action)
-  //   - summary entries (post-compaction anchor)
+  // Pending content for the next user message (flushed before each assistant turn).
   // Wire order per step: [screenshot] → [assistant] → [tool_result...] → [screenshot] → ...
-  // Message order:  user:[screenshot] → asst:[tool_use] → user:[results+screenshot] → ...
+  //
+  // Screenshots are embedded INSIDE tool_results (matching Anthropic's computer-use protocol).
+  // The model sees: tool_result(content=[image, "ok"]) — clearly linking the screenshot to the action.
+  // Only the initial screenshot (before any assistant turn) is a standalone user image.
   let pendingUserContent: Anthropic.MessageParam["content"] = [];
+  // Track the latest screenshot to embed in the next tool_result batch
+  let pendingScreenshot: { base64: string; compressed: boolean; stepIndex: number } | null = null;
+  // Track whether we've seen an assistant turn yet (to distinguish initial vs action screenshots)
+  let seenAssistant = false;
+  // Track tool_result IDs in the current batch — the screenshot attaches to the last computer action's result
+  let toolResultBatch: Array<{ toolUseId: string; ok: boolean; error?: string; isComputer: boolean }> = [];
 
   const flushUserMessage = () => {
     if (pendingUserContent.length === 0) return;
@@ -48,13 +68,56 @@ function buildMessages(context: StepContext): Anthropic.MessageParam[] {
     pendingUserContent = [];
   };
 
-  for (const msg of context.wireHistory) {
-    if (msg.role === "screenshot") {
-      if (msg.compressed) {
-        // Compressed: use a text token so the model knows a step happened
+  // Emit accumulated tool_results, embedding the pending screenshot in the last computer result
+  const flushToolResults = () => {
+    for (let i = 0; i < toolResultBatch.length; i++) {
+      const tr = toolResultBatch[i]!;
+      const isLast = i === toolResultBatch.length - 1;
+      // Attach screenshot to the last computer tool_result (or last result if no computer actions)
+      const attachScreenshot = pendingScreenshot && isLast;
+
+      if (attachScreenshot && !pendingScreenshot!.compressed) {
+        // Rich content: [screenshot_image, result_text]
+        const resultText = tr.ok
+          ? "Action completed successfully"
+          : `Error: ${tr.error ?? "unknown"}`;
+        pendingUserContent = [...pendingUserContent, {
+          type: "tool_result" as const,
+          tool_use_id: tr.toolUseId,
+          content: [
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: "image/png",
+                data: pendingScreenshot!.base64,
+              },
+            },
+            { type: "text", text: resultText },
+          ],
+          ...(!tr.ok ? { is_error: true as const } : {}),
+        } as unknown as Anthropic.ImageBlockParam];
+        pendingScreenshot = null;
+      } else {
+        // Simple text content
+        pendingUserContent = [...pendingUserContent, {
+          type: "tool_result" as const,
+          tool_use_id: tr.toolUseId,
+          content: tr.ok
+            ? "Action completed successfully"
+            : `Error: ${tr.error ?? "unknown"}`,
+          ...(!tr.ok ? { is_error: true as const } : {}),
+        } as unknown as Anthropic.ImageBlockParam];
+      }
+    }
+
+    // If screenshot wasn't attached to any tool_result (compressed, or no tool_results),
+    // add it as a standalone content block
+    if (pendingScreenshot) {
+      if (pendingScreenshot.compressed) {
         pendingUserContent = [...pendingUserContent, {
           type: "text",
-          text: `[screenshot: step ${(msg.stepIndex as number) + 1}]`,
+          text: `[screenshot: step ${pendingScreenshot.stepIndex + 1}]`,
         } as Anthropic.TextBlockParam];
       } else {
         pendingUserContent = [...pendingUserContent, {
@@ -62,14 +125,51 @@ function buildMessages(context: StepContext): Anthropic.MessageParam[] {
           source: {
             type: "base64",
             media_type: "image/png",
-            data: msg.base64 as string,
+            data: pendingScreenshot.base64,
           },
         } as Anthropic.ImageBlockParam];
       }
+      pendingScreenshot = null;
+    }
+
+    toolResultBatch = [];
+  };
+
+  for (const msg of context.wireHistory) {
+    if (msg.role === "screenshot") {
+      if (!seenAssistant) {
+        // Initial screenshot (before first assistant turn) — standalone user image
+        if (msg.compressed) {
+          pendingUserContent = [...pendingUserContent, {
+            type: "text",
+            text: `[screenshot: step ${(msg.stepIndex as number) + 1}]`,
+          } as Anthropic.TextBlockParam];
+        } else {
+          pendingUserContent = [...pendingUserContent, {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: "image/png",
+              data: msg.base64 as string,
+            },
+          } as Anthropic.ImageBlockParam];
+        }
+      } else {
+        // Post-action screenshot — will be embedded in the last tool_result
+        // Flush any pending tool_results first (from a previous step's batch)
+        flushToolResults();
+        pendingScreenshot = {
+          base64: msg.base64 as string,
+          compressed: Boolean(msg.compressed),
+          stepIndex: msg.stepIndex as number,
+        };
+      }
     } else if (msg.role === "assistant") {
-      // Flush accumulated user content (screenshots, tool_results, summaries)
-      // before emitting the assistant turn.
+      // Flush any remaining tool_results + screenshot from previous step
+      flushToolResults();
+      // Flush accumulated user content before emitting the assistant turn
       flushUserMessage();
+      seenAssistant = true;
 
       const content: Anthropic.ContentBlock[] = [];
       if (msg.thinking) {
@@ -85,7 +185,6 @@ function buildMessages(context: StepContext): Anthropic.MessageParam[] {
             if (id === "text_end_turn") {
               // Text-only response: no tool_use block was emitted — skip
             } else {
-              // task_complete tool call — replay with correct tool name
               content.push({
                 type: "tool_use" as const,
                 id,
@@ -94,7 +193,6 @@ function buildMessages(context: StepContext): Anthropic.MessageParam[] {
               } as unknown as Anthropic.ContentBlock);
             }
           } else if (action.type === "goto") {
-            // navigate tool call — replay with correct tool name
             content.push({
               type: "tool_use" as const,
               id,
@@ -123,18 +221,18 @@ function buildMessages(context: StepContext): Anthropic.MessageParam[] {
       }
     } else if (msg.role === "tool_result") {
       const toolUseId = (msg.tool_call_id as string | undefined) ?? `toolu_unknown`;
-      // Skip tool_results for text-only terminations (no matching tool_use block)
       if (toolUseId === "text_end_turn") {
         // nothing — no tool_use was emitted for this
       } else {
-        pendingUserContent = [...pendingUserContent, {
-          type: "tool_result" as const,
-          tool_use_id: toolUseId,
-          content: (msg.ok as boolean)
-            ? "Action completed successfully"
-            : `Error: ${(msg.error as string | undefined) ?? "unknown"}`,
-          ...(!(msg.ok as boolean) ? { is_error: true as const } : {}),
-        } as unknown as Anthropic.ImageBlockParam];
+        const actionType = msg.action as string | undefined;
+        // Computer tool actions are everything except goto/writeState/terminate
+        const isComputer = actionType !== "goto" && actionType !== "writeState" && actionType !== "terminate";
+        toolResultBatch.push({
+          toolUseId,
+          ok: msg.ok as boolean,
+          error: msg.error as string | undefined,
+          isComputer,
+        });
       }
     } else if (msg.role === "summary") {
       pendingUserContent = [...pendingUserContent, {
@@ -144,7 +242,8 @@ function buildMessages(context: StepContext): Anthropic.MessageParam[] {
     }
   }
 
-  // Flush remaining pending content (current step's screenshot + any trailing tool_results)
+  // Flush remaining tool_results + screenshot (current step)
+  flushToolResults();
   flushUserMessage();
 
   return messages;
@@ -252,10 +351,10 @@ export class AnthropicAdapter implements ModelAdapter {
       };
     }
 
-    const response = await this.client.beta.messages.create({
+    const response = await withRetry(() => this.client.beta.messages.create({
       ...requestParams,
       stream: false,
-    }) as Anthropic.Beta.BetaMessage;
+    })) as Anthropic.Beta.BetaMessage;
 
     const actions: CUAAction[] = [];
     const toolCallIds: string[] = [];
@@ -397,9 +496,9 @@ export class AnthropicAdapter implements ModelAdapter {
 
     // Use try-finally so _lastStreamResponse is always set even if consumer breaks early
     try {
-      const msgStream = this.client.beta.messages.stream(
+      const msgStream = await withRetry(() => Promise.resolve(this.client.beta.messages.stream(
         streamParams as unknown as Parameters<typeof this.client.beta.messages.stream>[0],
-      );
+      )));
 
       for await (const event of msgStream) {
         const evType = event.type;
@@ -497,7 +596,7 @@ export class AnthropicAdapter implements ModelAdapter {
       return msg;
     });
 
-    const response = await this.client.messages.create({
+    const response = await withRetry(() => this.client.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 1024,
       messages: [{
@@ -508,7 +607,7 @@ export class AnthropicAdapter implements ModelAdapter {
           `History (${wireHistory.length} messages): ${JSON.stringify(safeHistory)}`,
         ].filter(Boolean).join("\n\n"),
       }],
-    });
+    }));
 
     const firstBlock = response.content[0];
     return firstBlock?.type === "text" ? firstBlock.text : "Session history summarized.";
