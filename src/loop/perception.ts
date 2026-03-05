@@ -1,7 +1,7 @@
 import type { BrowserTab } from "../browser/tab.js";
 import type { ModelAdapter, ModelResponse, StepContext } from "../model/adapter.js";
-import type { ActionExecution, CUAAction, LoopOptions, LoopResult, PreActionHook, SemanticStep, TokenUsage } from "../types.js";
-import type { Verifier } from "./gate.js";
+import type { ActionExecution, Action, LoopOptions, LoopResult, PreActionHook, SemanticStep, TokenUsage } from "../types.js";
+import type { Verifier } from "./verifier.js";
 import type { LoopMonitor } from "./monitor.js";
 import { ConsoleMonitor } from "./monitor.js";
 import { StateStore } from "./state.js";
@@ -12,7 +12,7 @@ import { LumenLogger } from "../logger.js";
 import { RepeatDetector, nudgeMessage } from "./repeat-detector.js";
 import { ActionCache, screenshotHash } from "./action-cache.js";
 
-const CUA_TOOLS: CUAAction["type"][] = [
+const CUA_TOOLS: Action["type"][] = [
   "click", "doubleClick", "drag", "scroll",
   "type", "keyPress", "wait", "goto",
   "writeState", "screenshot", "terminate",
@@ -25,7 +25,7 @@ export interface PerceptionLoopOptions {
   history: HistoryManager;
   state: StateStore;
   policy?: SessionPolicy;
-  gate?: Verifier;
+  verifier?: Verifier;
   monitor?: LoopMonitor;
   timing?: RouterTiming;
   /** Optional hook called before every action. Return deny to block with reason. */
@@ -48,7 +48,7 @@ export class PerceptionLoop {
   private readonly history: HistoryManager;
   private readonly state: StateStore;
   private readonly policy?: SessionPolicy;
-  private readonly gate?: Verifier;
+  private readonly verifier?: Verifier;
   private readonly monitor: LoopMonitor;
   private readonly router: ActionRouter;
   private readonly preActionHook?: PreActionHook;
@@ -65,7 +65,7 @@ export class PerceptionLoop {
     this.history = opts.history;
     this.state = opts.state;
     this.policy = opts.policy;
-    this.gate = opts.gate;
+    this.verifier = opts.verifier;
     this.monitor = opts.monitor ?? new ConsoleMonitor();
     this.preActionHook = opts.preActionHook;
     this.keepRecentScreenshots = opts.keepRecentScreenshots ?? 2;
@@ -174,7 +174,7 @@ export class PerceptionLoop {
       //    Wire ordering is maintained by buffering outcomes during the stream and
       //    replaying them AFTER recording the assistant turn:
       //    [screenshot → assistant → tool_result...] ← correct Anthropic format
-      const bufferedOutcomes: Array<{ action: CUAAction; wireOutcome: { ok: boolean; error?: string } }> = [];
+      const bufferedOutcomes: Array<{ action: Action; wireOutcome: { ok: boolean; error?: string } }> = [];
       let terminated = false;
       let terminationResult: LoopResult | null = null;
 
@@ -221,12 +221,12 @@ export class PerceptionLoop {
 
         // 5d. Termination check
         if (outcome.terminated) {
-          if (this.gate) {
+          if (this.verifier) {
             const currentScreenshot = await this.tab.screenshot();
-            const gateResult = await this.gate.verify(currentScreenshot, this.tab.url());
-            if (!gateResult.passed) {
-              const reason = gateResult.reason ?? "completion condition not met";
-              this.log.loop(`step ${step + 1}: termination rejected by gate: ${reason}`);
+            const verifyResult = await this.verifier.verify(currentScreenshot, this.tab.url());
+            if (!verifyResult.passed) {
+              const reason = verifyResult.reason ?? "completion condition not met";
+              this.log.loop(`step ${step + 1}: termination rejected by verifier: ${reason}`);
               const wireOutcome = { ok: false, error: `terminate rejected: ${reason}` };
               bufferedOutcomes.push({ action, wireOutcome });
               this.monitor.terminationRejected(step, reason);
@@ -366,7 +366,7 @@ export class PerceptionLoop {
         // tool_use ID in the assistant turn — Anthropic rejects mismatched IDs.
         if (streamResponse.actions.length === 0) {
           this.log.loop(`step ${step + 1}: model returned no actions — injecting noop screenshot`);
-          const noopAction: CUAAction = { type: "screenshot" };
+          const noopAction: Action = { type: "screenshot" };
           const noopId = `toolu_noop_${Date.now()}`;
           streamResponse.actions.push(noopAction);
           if (!streamResponse.toolCallIds) streamResponse.toolCallIds = [];
@@ -448,7 +448,7 @@ export class PerceptionLoop {
 void CUA_TOOLS;
 
 /** Returns true for actions that indicate the agent is making progress, not stalling. */
-function isProductiveAction(action: CUAAction): boolean {
+function isProductiveAction(action: Action): boolean {
   switch (action.type) {
     case "click":
     case "doubleClick":
@@ -468,7 +468,7 @@ function isProductiveAction(action: CUAAction): boolean {
  *  Only writeState (agent saved progress) or terminate (agent completed) indicate
  *  the agent actually responded to the nudge. Goto to a DIFFERENT page is handled
  *  by the URL change check at step start, not here. */
-function isUrlEscapeAction(action: CUAAction): boolean {
+function isUrlEscapeAction(action: Action): boolean {
   switch (action.type) {
     case "writeState":
     case "terminate":

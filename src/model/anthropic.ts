@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { ModelAdapter, StepContext } from "./adapter.js";
 import type { ModelResponse } from "./adapter.js";
 import { withRetry } from "./adapter.js";
-import type { CUAAction, TaskState, WireMessage } from "../types.js";
+import type { Action, TaskState, WireMessage } from "../types.js";
 import { ActionDecoder } from "./decoder.js";
 
 const decoder = new ActionDecoder();
@@ -176,7 +176,7 @@ function buildMessages(context: StepContext): Anthropic.MessageParam[] {
         content.push({ type: "text", text: msg.thinking as string } as unknown as Anthropic.ContentBlock);
       }
       if (Array.isArray(msg.actions)) {
-        const actions = msg.actions as CUAAction[];
+        const actions = msg.actions as Action[];
         const toolCallIds = (msg.tool_call_ids as string[] | undefined) ?? [];
         for (let i = 0; i < actions.length; i++) {
           const action = actions[i]!;
@@ -356,7 +356,7 @@ export class AnthropicAdapter implements ModelAdapter {
       stream: false,
     })) as Anthropic.Beta.BetaMessage;
 
-    const actions: CUAAction[] = [];
+    const actions: Action[] = [];
     const toolCallIds: string[] = [];
     let thinking: string | undefined;
     let finalText = "";
@@ -417,7 +417,7 @@ export class AnthropicAdapter implements ModelAdapter {
     return this._lastStreamResponse;
   }
 
-  async *stream(context: StepContext): AsyncIterable<CUAAction> {
+  async *stream(context: StepContext): AsyncIterable<Action> {
     const messages = buildMessages(context);
     const systemPrompt = buildSystemPrompt(context);
     const { type: toolType, beta } = computerToolVersion(this.modelId);
@@ -482,7 +482,7 @@ export class AnthropicAdapter implements ModelAdapter {
     const blockInputs = new Map<number, string>();
     const blockIds = new Map<number, string>();
     const blockNames = new Map<number, string>();
-    const allActions: CUAAction[] = [];
+    const allActions: Action[] = [];
     const allToolCallIds: string[] = [];
     let inputTokens = 0;
     let outputTokens = 0;
@@ -492,7 +492,7 @@ export class AnthropicAdapter implements ModelAdapter {
     // Track text content — when model responds with text only (end_turn, no tool_use),
     // that IS the final answer. We emit a synthetic terminate action.
     let finalTextAccum = "";
-    let pendingTerminate: CUAAction | null = null;
+    let pendingTerminate: Action | null = null;
 
     // Use try-finally so _lastStreamResponse is always set even if consumer breaks early
     try {
@@ -532,7 +532,7 @@ export class AnthropicAdapter implements ModelAdapter {
             const input = JSON.parse(jsonStr) as Record<string, unknown>;
             const id = blockIds.get(ev.index) ?? `toolu_${ev.index}`;
             const blockName = blockNames.get(ev.index) ?? "computer";
-            let action: CUAAction;
+            let action: Action;
             if (blockName === "task_complete") {
               const result = (input.result as string) ?? "";
               action = { type: "terminate", status: "success", result };

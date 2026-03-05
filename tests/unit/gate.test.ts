@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { UrlMatchesGate, CustomGate } from "../../src/loop/gate.js";
+import { UrlMatchesGate, CustomGate } from "../../src/loop/verifier.js";
 import type { ScreenshotResult } from "../../src/types.js";
 
 const mockScreenshot: ScreenshotResult = {

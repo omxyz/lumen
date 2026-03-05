@@ -1,8 +1,5 @@
 // ─── Coordinates ─────────────────────────────────────────────────────────────
 
-/** Pixel coordinate in viewport space. Sent directly to browser. */
-export type PixelCoord = number;
-
 export interface Point {
   x: number;
   y: number;
@@ -37,16 +34,16 @@ export interface ScreenshotOptions {
  *  Mirrors Claude Code's task state pattern: replace-on-write structured data. */
 export type TaskState = Record<string, unknown>;
 
-// ─── CUA Actions ─────────────────────────────────────────────────────────────
+// ─── Actions ─────────────────────────────────────────────────────────────────
 
 /** All coordinates are in viewport pixel space. Decoders convert from each
  *  provider's native format (Anthropic/OpenAI pixels, Google 0-1000) to pixels
  *  at decode time. ActionRouter uses coords directly without conversion. */
-export type CUAAction =
-  | { type: "click"; x: PixelCoord; y: PixelCoord; button?: "left" | "right" | "middle" }
-  | { type: "doubleClick"; x: PixelCoord; y: PixelCoord }
-  | { type: "drag"; startX: PixelCoord; startY: PixelCoord; endX: PixelCoord; endY: PixelCoord }
-  | { type: "scroll"; x: PixelCoord; y: PixelCoord; direction: "up" | "down" | "left" | "right"; amount: number }
+export type Action =
+  | { type: "click"; x: number; y: number; button?: "left" | "right" | "middle" }
+  | { type: "doubleClick"; x: number; y: number }
+  | { type: "drag"; startX: number; startY: number; endX: number; endY: number }
+  | { type: "scroll"; x: number; y: number; direction: "up" | "down" | "left" | "right"; amount: number }
   | { type: "type"; text: string }
   | { type: "keyPress"; keys: string[] }
   | { type: "wait"; ms: number }
@@ -54,7 +51,7 @@ export type CUAAction =
   | { type: "writeState"; data: TaskState }
   | { type: "screenshot" }
   | { type: "terminate"; status: "success" | "failure"; result: string }
-  | { type: "hover"; x: PixelCoord; y: PixelCoord }
+  | { type: "hover"; x: number; y: number }
   | { type: "delegate"; instruction: string; maxSteps?: number };
 
 // ─── Action Outcome ───────────────────────────────────────────────────────────
@@ -65,7 +62,7 @@ export interface ActionOutcome {
   error?: string;
 }
 
-/** Returned by ActionRouter after executing a CUAAction. */
+/** Returned by ActionRouter after executing an Action. */
 export interface ActionExecution {
   ok: boolean;
   error?: string;
@@ -96,7 +93,7 @@ export interface SemanticStep {
   screenshotBase64: string;
   thinking?: string;
   actions: Array<{
-    action: CUAAction;
+    action: Action;
     outcome: { ok: boolean; error?: string };
   }>;
   agentState: TaskState | null;
@@ -133,7 +130,7 @@ export interface LoopResult {
 
 // ─── Session ──────────────────────────────────────────────────────────────────
 
-export interface CUAResult {
+export interface RunResult {
   status: "success" | "failure" | "maxSteps";
   result: string;
   steps: number;
@@ -151,17 +148,17 @@ export interface RunOptions {
 
 // ─── Streaming Events ─────────────────────────────────────────────────────────
 
-export type CUAEvent =
+export type StreamEvent =
   | { type: "step_start"; step: number; maxSteps: number; url: string }
   | { type: "screenshot"; step: number; imageBase64: string }
   | { type: "thinking"; step: number; text: string }
-  | { type: "action"; step: number; action: CUAAction }
-  | { type: "action_result"; step: number; action: CUAAction; ok: boolean; error?: string }
-  | { type: "action_blocked"; step: number; action: CUAAction; reason: string }
+  | { type: "action"; step: number; action: Action }
+  | { type: "action_result"; step: number; action: Action; ok: boolean; error?: string }
+  | { type: "action_blocked"; step: number; action: Action; reason: string }
   | { type: "state_written"; step: number; data: TaskState }
   | { type: "compaction"; step: number; tokensBefore: number; tokensAfter: number }
   | { type: "termination_rejected"; step: number; reason: string }
-  | { type: "done"; result: CUAResult };
+  | { type: "done"; result: RunResult };
 
 // ─── Pre-Action Hook ──────────────────────────────────────────────────────────
 
@@ -175,7 +172,7 @@ export type PreActionDecision =
  * Complements SessionPolicy (declarative) with imperative custom logic.
  * Common uses: audit logging, rate limiting, custom deny rules.
  */
-export type PreActionHook = (action: CUAAction) => Promise<PreActionDecision> | PreActionDecision;
+export type PreActionHook = (action: Action) => Promise<PreActionDecision> | PreActionDecision;
 
 // ─── Logging ──────────────────────────────────────────────────────────────────
 
@@ -188,8 +185,6 @@ export interface LogLine {
 
 // ─── Agent (public facade) ────────────────────────────────────────────────────
 
-export type AgentResult = CUAResult;
-export type AgentEvent = CUAEvent;
 export interface SerializedAgent extends SerializedHistory { modelId: string; }
 
 export type BrowserOptions =
@@ -225,7 +220,7 @@ export interface AgentOptions {
   policy?: import("./loop/policy.js").SessionPolicyOptions;
   /** Optional hook called before every action. Return deny to block with reason. */
   preActionHook?: PreActionHook;
-  completionGate?: import("./loop/gate.js").Verifier;
+  verifier?: import("./loop/verifier.js").Verifier;
   monitor?: import("./loop/monitor.js").LoopMonitor;
   /** Resume with pre-loaded history. Prefer Agent.resume() for full roundtrip. */
   initialHistory?: import("./types.js").SerializedHistory;

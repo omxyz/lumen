@@ -1,7 +1,7 @@
 import type { ModelAdapter, ModelResponse } from "../model/adapter.js";
 import type {
   ActionExecution,
-  CUAAction,
+  Action,
   SemanticStep,
   SerializedHistory,
   TaskState,
@@ -16,7 +16,7 @@ export class HistoryManager {
   private lastResponse: ModelResponse | null = null;
 
   /** Tracks (action, toolCallId) pairs awaiting their tool_result. */
-  private pendingToolCalls: Array<{ action: CUAAction; toolCallId: string }> = [];
+  private pendingToolCalls: Array<{ action: Action; toolCallId: string }> = [];
 
   constructor(private readonly contextWindowTokens: number) {}
 
@@ -26,7 +26,7 @@ export class HistoryManager {
     return [...this.wire];
   }
 
-  appendActionOutcome(action: CUAAction, outcome: ActionExecution): void {
+  appendActionOutcome(action: Action, outcome: ActionExecution): void {
     // Find the tool call ID for this action so tool_results correlate with tool_use blocks.
     const pending = this.pendingToolCalls.find((p) => p.action === action);
     const toolCallId = pending?.toolCallId ?? `toolu_${action.type}_${Date.now()}`;

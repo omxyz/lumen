@@ -5,7 +5,7 @@ import { StateStore } from "../../src/loop/state.js";
 import { MockBrowserTab } from "./mock-tab.js";
 import { MockAdapter } from "./mock-adapter.js";
 import type { StepContext, ModelResponse } from "../../src/model/adapter.js";
-import type { CUAAction, TaskState, WireMessage } from "../../src/types.js";
+import type { Action, TaskState, WireMessage } from "../../src/types.js";
 
 /** Adapter that returns high token counts to trigger compaction, then terminates. */
 class HighTokenAdapter {
@@ -18,7 +18,7 @@ class HighTokenAdapter {
   compactionCalled = false;
   private _lastResponse: ModelResponse | null = null;
 
-  private readonly steps: CUAAction[][] = [
+  private readonly steps: Action[][] = [
     [{ type: "screenshot" }],
     [{ type: "terminate", status: "success", result: "done" }],
   ];
@@ -35,7 +35,7 @@ class HighTokenAdapter {
     return response;
   }
 
-  async *stream(context: StepContext): AsyncIterable<CUAAction> {
+  async *stream(context: StepContext): AsyncIterable<Action> {
     const response = await this.step(context);
     for (const action of response.actions) yield action;
   }

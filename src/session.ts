@@ -1,6 +1,6 @@
 import type { ModelAdapter } from "./model/adapter.js";
 import type { BrowserTab } from "./browser/tab.js";
-import type { Verifier } from "./loop/gate.js";
+import type { Verifier } from "./loop/verifier.js";
 import type { LoopMonitor } from "./loop/monitor.js";
 import type { RouterTiming } from "./loop/router.js";
 import type { SessionPolicyOptions } from "./loop/policy.js";
@@ -9,7 +9,7 @@ import { StateStore } from "./loop/state.js";
 import { HistoryManager } from "./loop/history.js";
 import { PerceptionLoop } from "./loop/perception.js";
 import type {
-  CUAResult,
+  RunResult,
   PreActionHook,
   RunOptions,
   SerializedHistory,
@@ -49,7 +49,7 @@ export interface SessionOptions {
   preActionHook?: PreActionHook;
 
   /** Verify terminate before accepting the exit. */
-  completionGate?: Verifier;
+  verifier?: Verifier;
 
   /** Observability hook called at each step. */
   monitor?: LoopMonitor;
@@ -102,7 +102,7 @@ export class Session {
     }
   }
 
-  async run(options: RunOptions): Promise<CUAResult> {
+  async run(options: RunOptions): Promise<RunResult> {
     const maxSteps = options.maxSteps ?? this.opts.maxSteps ?? 30;
     this.log.loop(
       `session.run: instruction="${options.instruction?.slice(0, 80)}" maxSteps=${maxSteps}`,
@@ -117,7 +117,7 @@ export class Session {
       history: this.history,
       state: this.state,
       policy,
-      gate: this.opts.completionGate,
+      verifier: this.opts.verifier,
       monitor: this.opts.monitor,
       timing: this.opts.timing,
       preActionHook: this.opts.preActionHook,

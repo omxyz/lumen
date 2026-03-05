@@ -1,6 +1,6 @@
 // Public API — primary entry point
 export { Agent } from "./agent.js";
-export type { AgentOptions, AgentResult, AgentEvent, SerializedAgent, BrowserOptions } from "./types.js";
+export type { AgentOptions, SerializedAgent, BrowserOptions } from "./types.js";
 
 // Logger
 export { LumenLogger } from "./logger.js";
@@ -11,9 +11,9 @@ export type { SessionOptions } from "./session.js";
 
 // Types
 export type {
-  CUAAction,
-  CUAEvent,
-  CUAResult,
+  Action,
+  StreamEvent,
+  RunResult,
   RunOptions,
   LoopOptions,
   LoopResult,
@@ -33,8 +33,8 @@ export type {
 } from "./types.js";
 
 // Errors
-export { CUAError } from "./errors.js";
-export type { CUAErrorCode } from "./errors.js";
+export { LumenError } from "./errors.js";
+export type { LumenErrorCode } from "./errors.js";
 
 // Browser
 export type { BrowserTab, ClickOptions, TypeOptions, DragOptions } from "./browser/tab.js";
@@ -72,8 +72,8 @@ export { SessionPolicy } from "./loop/policy.js";
 export type { SessionPolicyOptions, SessionPolicyResult } from "./loop/policy.js";
 
 // Verifiers (completion gates)
-export { UrlMatchesGate, CustomGate, ModelVerifier } from "./loop/gate.js";
-export type { Verifier, CompletionGate, GateResult } from "./loop/gate.js";
+export { UrlMatchesGate, CustomGate, ModelVerifier } from "./loop/verifier.js";
+export type { Verifier, VerifyResult } from "./loop/verifier.js";
 
 // Monitors
 export { ConsoleMonitor, NoopMonitor } from "./loop/monitor.js";

@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { HistoryManager } from "../../src/loop/history.js";
-import type { CUAAction } from "../../src/types.js";
+import type { Action } from "../../src/types.js";
 import type { ModelResponse } from "../../src/model/adapter.js";
 
 /** Helper to make a response with explicit tool call IDs. */
 function makeResponseWithIds(
-  actions: CUAAction[],
+  actions: Action[],
   toolCallIds: string[],
   inputTokens = 100,
 ): ModelResponse {
@@ -20,7 +20,7 @@ function makeResponseWithIds(
 describe("HistoryManager — tool call ID correlation", () => {
   it("tool_result references the correct tool_call_id from the matching tool_use", () => {
     const h = new HistoryManager(100_000);
-    const clickAction: CUAAction = { type: "click", x: 500, y: 500 };
+    const clickAction: Action = { type: "click", x: 500, y: 500 };
 
     // Simulate adapter returning a response with a real tool_use ID
     const response = makeResponseWithIds([clickAction], ["toolu_abc123"]);
@@ -44,8 +44,8 @@ describe("HistoryManager — tool call ID correlation", () => {
 
   it("multiple actions in one step each get their own tool_call_id", () => {
     const h = new HistoryManager(100_000);
-    const click: CUAAction = { type: "click", x: 100, y: 100 };
-    const type_: CUAAction = { type: "type", text: "hello" };
+    const click: Action = { type: "click", x: 100, y: 100 };
+    const type_: Action = { type: "type", text: "hello" };
 
     const response = makeResponseWithIds([click, type_], ["toolu_click1", "toolu_type2"]);
     h.appendResponse(response);
@@ -62,7 +62,7 @@ describe("HistoryManager — tool call ID correlation", () => {
 
   it("falls back to a generated ID when no toolCallIds provided", () => {
     const h = new HistoryManager(100_000);
-    const action: CUAAction = { type: "screenshot" };
+    const action: Action = { type: "screenshot" };
 
     // Response without toolCallIds (e.g. non-Anthropic adapters)
     h.appendResponse({

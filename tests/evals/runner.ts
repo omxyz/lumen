@@ -1,11 +1,11 @@
-import type { AgentResult } from "../../src/types.js";
+import type { RunResult } from "../../src/types.js";
 
 export interface EvalTask {
   name: string;
   instruction: string;
   url: string;
   maxSteps?: number;
-  score(result: AgentResult): number;  // 0.0 to 1.0
+  score(result: RunResult): number;  // 0.0 to 1.0
 }
 
 export interface EvalResult {
@@ -14,13 +14,13 @@ export interface EvalResult {
   score: number;
   steps: number;
   totalTokens: number;
-  status: AgentResult["status"];
+  status: RunResult["status"];
   durationMs: number;
 }
 
 export async function runEval(
   task: EvalTask,
-  runAgent: (instruction: string, url: string, maxSteps: number) => Promise<AgentResult>,
+  runAgent: (instruction: string, url: string, maxSteps: number) => Promise<RunResult>,
 ): Promise<EvalResult> {
   const start = Date.now();
   const result = await runAgent(task.instruction, task.url, task.maxSteps ?? 30);

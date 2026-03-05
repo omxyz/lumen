@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { HistoryManager } from "../../src/loop/history.js";
-import type { CUAAction, SemanticStep } from "../../src/types.js";
+import type { Action, SemanticStep } from "../../src/types.js";
 import type { ModelResponse } from "../../src/model/adapter.js";
 
 function makeResponse(inputTokens: number): ModelResponse {
   return {
-    actions: [{ type: "screenshot" } as CUAAction],
+    actions: [{ type: "screenshot" } as Action],
     usage: { inputTokens, outputTokens: 50 },
     rawResponse: null,
   };

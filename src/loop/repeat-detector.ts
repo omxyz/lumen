@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import type { CUAAction } from "../types.js";
+import type { Action } from "../types.js";
 
 /**
  * Detects when the agent is stuck repeating actions or stalling on one page.
@@ -25,7 +25,7 @@ export class RepeatDetector {
   }
 
   /** Records an action. Returns the threshold level hit (5, 8, or 12), or null. */
-  record(action: CUAAction): number | null {
+  record(action: Action): number | null {
     const hash = createHash("sha256").update(this.normalize(action)).digest("hex");
     const category = this.categorize(action);
 
@@ -88,7 +88,7 @@ export class RepeatDetector {
    * - "productive": click, type, goto, writeState, terminate — actually doing something
    * - "noop": screenshot (model returned no actions)
    */
-  private categorize(action: CUAAction): string {
+  private categorize(action: Action): string {
     switch (action.type) {
       case "scroll":
       case "wait":
@@ -121,7 +121,7 @@ export class RepeatDetector {
     }
   }
 
-  private normalize(action: CUAAction): string {
+  private normalize(action: Action): string {
     // Bucket size: 64px ≈ 5% of a 1280px viewport — treats nearby coords as identical
     const BUCKET = 64;
     switch (action.type) {

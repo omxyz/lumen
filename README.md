@@ -32,10 +32,10 @@ Lumen is a clean, production-grade redesign of the CUA path in Stagehand V3 — 
 - **Principled history compression** — tier-1 screenshot compression (keeps the last N frames) + tier-2 LLM summarization at 80% context utilization. Achieves 32% fewer tokens than Stagehand V3 in benchmarks.
 - **Unified coordinate model** — each model provider emits coordinates in its own format (Anthropic/OpenAI pixels, Google 0–1000). `ActionDecoder` converts all coordinates to viewport pixels at decode time. `ActionRouter` dispatches pixel coords directly to the browser.
 - **Persistent within-session memory** — the `writeState` action persists structured JSON that survives history compaction via `StateStore`.
-- **Streaming events** — `agent.stream()` yields a typed `CUAEvent` async iterable for real-time UI.
+- **Streaming events** — `agent.stream()` yields a typed `StreamEvent` async iterable for real-time UI.
 - **Session resumption** — serialize to JSON, restore later with `Agent.resume()`.
 - **Safety hooks** — `SessionPolicy` (domain allowlist/blocklist, action-type filter) and a `PreActionHook` for imperative deny logic.
-- **Completion gates** — plug in a `CompletionGate` to verify the task is actually done before the loop exits.
+- **Completion verification** — plug in a `Verifier` to verify the task is actually done before the loop exits.
 - **Repeat detection** — three-layer detection (exact action, action category, URL stall) with escalating nudges that help the model self-correct when stuck.
 - **Action caching** — optional on-disk action cache for replaying known-good actions on repeated runs.
 - **Granular debug logging** — `LumenLogger` with per-surface env vars (`LUMEN_LOG_CDP`, `LUMEN_LOG_ACTIONS`, etc.) for surgical debugging.
@@ -242,7 +242,7 @@ interface AgentOptions {
   // Safety
   policy?: SessionPolicyOptions;
   preActionHook?: PreActionHook;
-  completionGate?: Verifier;
+  verifier?: Verifier;
 
   // Timing overrides (milliseconds)
   timing?: {
@@ -275,7 +275,7 @@ interface RunOptions {
 
 ## Streaming Events
 
-`agent.stream()` returns an async iterable of `CUAEvent` objects, useful for building real-time UIs or progress indicators.
+`agent.stream()` returns an async iterable of `StreamEvent` objects, useful for building real-time UIs or progress indicators.
 
 ```typescript
 const agent = new Agent({ model: "anthropic/claude-sonnet-4-6", browser: { type: "local" } });
@@ -316,13 +316,13 @@ await agent.close();
 | `step_start` | `step`, `maxSteps`, `url` |
 | `screenshot` | `step`, `imageBase64` |
 | `thinking` | `step`, `text` |
-| `action` | `step`, `action: CUAAction` |
+| `action` | `step`, `action: Action` |
 | `action_result` | `step`, `action`, `ok`, `error?` |
 | `action_blocked` | `step`, `action`, `reason` |
 | `state_written` | `step`, `data: TaskState` |
 | `compaction` | `step`, `tokensBefore`, `tokensAfter` |
 | `termination_rejected` | `step`, `reason` |
-| `done` | `result: CUAResult` |
+| `done` | `result: RunResult` |
 
 ---
 
@@ -393,9 +393,9 @@ const agent = new Agent({
 });
 ```
 
-### CompletionGate — verify the task is actually done
+### Verifier — verify the task is actually done
 
-By default, the loop exits as soon as the model emits `terminate`. A `CompletionGate` lets you add your own verification:
+By default, the loop exits as soon as the model emits `terminate`. A `Verifier` lets you add your own verification:
 
 ```typescript
 import { Agent, UrlMatchesGate, CustomGate } from "@omlabs/lumen";
@@ -404,11 +404,11 @@ import { Agent, UrlMatchesGate, CustomGate } from "@omlabs/lumen";
 const agent = new Agent({
   model: "anthropic/claude-sonnet-4-6",
   browser: { type: "local" },
-  completionGate: new UrlMatchesGate(/\/confirmation\?order=\d+/),
+  verifier: new UrlMatchesGate(/\/confirmation\?order=\d+/),
 });
 
 // Custom: inspect the screenshot
-const gate = new CustomGate(
+const verifier = new CustomGate(
   async (screenshot, url) => {
     // your verification logic
     return url.includes("/success");
@@ -425,11 +425,11 @@ const verifierAdapter = new AnthropicAdapter("claude-haiku-4-5-20251001", proces
 const agent = new Agent({
   model: "anthropic/claude-sonnet-4-6",
   browser: { type: "local" },
-  completionGate: new ModelVerifier(verifierAdapter, "Complete the checkout flow", 2),
+  verifier: new ModelVerifier(verifierAdapter, "Complete the checkout flow", 2),
 });
 ```
 
-If the gate fails, the termination is rejected and fed back to the model as an error, giving it a chance to recover.
+If the verifier fails, the termination is rejected and fed back to the model as an error, giving it a chance to recover.
 
 ---
 
@@ -453,7 +453,7 @@ tests/
 ├── unit/
 │   ├── state.test.ts          # StateStore
 │   ├── policy.test.ts         # SessionPolicy domain matching
-│   ├── gate.test.ts           # CompletionGate / Verifier
+│   ├── verifier.test.ts       # Verifier / VerifyResult
 │   ├── normalize.test.ts      # Coordinate helpers
 │   ├── decoder.test.ts        # ActionDecoder
 │   ├── history.test.ts        # HistoryManager compression
@@ -467,7 +467,7 @@ tests/
 │   ├── mock-adapter.ts        # In-memory ModelAdapter implementation
 │   ├── loop.test.ts           # Full PerceptionLoop integration
 │   ├── child.test.ts          # ChildLoop delegation
-│   ├── gate.test.ts           # CompletionGate integration
+│   ├── verifier.test.ts       # Verifier integration
 │   ├── policy-integration.test.ts
 │   ├── preaction-hook.test.ts
 │   ├── writestate.test.ts

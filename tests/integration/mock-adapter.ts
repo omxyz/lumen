@@ -1,5 +1,5 @@
 import type { ModelAdapter, StepContext, ModelResponse } from "../../src/model/adapter.js";
-import type { CUAAction, TaskState, WireMessage } from "../../src/types.js";
+import type { Action, TaskState, WireMessage } from "../../src/types.js";
 
 export class MockAdapter implements ModelAdapter {
   readonly modelId = "mock-model";
@@ -7,11 +7,11 @@ export class MockAdapter implements ModelAdapter {
   readonly nativeComputerUse = false;
   readonly contextWindowTokens = 100_000;
 
-  private actionQueue: CUAAction[][] = [];
+  private actionQueue: Action[][] = [];
   private stepCount = 0;
 
   /** Queue actions to return on successive step() calls */
-  queueActions(actions: CUAAction[]): this {
+  queueActions(actions: Action[]): this {
     this.actionQueue.push(actions);
     return this;
   }
@@ -38,7 +38,7 @@ export class MockAdapter implements ModelAdapter {
     return this._lastStreamResponse;
   }
 
-  async *stream(context: StepContext): AsyncIterable<CUAAction> {
+  async *stream(context: StepContext): AsyncIterable<Action> {
     const response = await this.step(context);
     this._lastStreamResponse = response;
     for (const action of response.actions) yield action;

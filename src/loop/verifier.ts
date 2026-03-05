@@ -1,7 +1,7 @@
 import type { ScreenshotResult } from "../types.js";
 import type { ModelAdapter } from "../model/adapter.js";
 
-export interface GateResult {
+export interface VerifyResult {
   passed: boolean;
   reason?: string;
 }
@@ -9,17 +9,14 @@ export interface GateResult {
 /** Verifies that a terminate action actually corresponds to task completion.
  *  A failed gate is fed back as an is_error tool result — the loop continues. */
 export interface Verifier {
-  verify(screenshot: ScreenshotResult, url: string): Promise<GateResult>;
+  verify(screenshot: ScreenshotResult, url: string): Promise<VerifyResult>;
 }
-
-/** @deprecated Use Verifier instead */
-export type CompletionGate = Verifier;
 
 /** Passes if the current URL matches the given pattern. */
 export class UrlMatchesGate implements Verifier {
   constructor(private readonly pattern: RegExp) {}
 
-  async verify(_screenshot: ScreenshotResult, url: string): Promise<GateResult> {
+  async verify(_screenshot: ScreenshotResult, url: string): Promise<VerifyResult> {
     if (this.pattern.test(url)) {
       return { passed: true };
     }
@@ -37,7 +34,7 @@ export class CustomGate implements Verifier {
     private readonly failureReason = "completion condition not met",
   ) {}
 
-  async verify(screenshot: ScreenshotResult, url: string): Promise<GateResult> {
+  async verify(screenshot: ScreenshotResult, url: string): Promise<VerifyResult> {
     const passed = await this.fn(screenshot, url);
     return passed ? { passed: true } : { passed: false, reason: this.failureReason };
   }
@@ -57,7 +54,7 @@ export class ModelVerifier implements Verifier {
     this.maxAttempts = maxAttempts;
   }
 
-  async verify(screenshot: ScreenshotResult, url: string): Promise<GateResult> {
+  async verify(screenshot: ScreenshotResult, url: string): Promise<VerifyResult> {
     if (this.attempts >= this.maxAttempts) {
       return { passed: true };
     }

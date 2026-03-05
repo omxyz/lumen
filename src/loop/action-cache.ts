@@ -1,14 +1,14 @@
 import { createHash } from "crypto";
 import { promises as fs } from "fs";
 import { join } from "path";
-import type { CUAAction } from "../types.js";
+import type { Action } from "../types.js";
 
 const COORD_ACTIONS = new Set(["click", "doubleClick", "hover", "scroll", "drag"]);
 const SIMILARITY_THRESHOLD = 0.92;
 
 export interface CachedAction {
   version: 1;
-  type: CUAAction["type"];
+  type: Action["type"];
   url: string;
   instructionHash: string;
   screenshotHash?: string;
@@ -46,7 +46,7 @@ export class ActionCache {
 
   async set(
     key: string,
-    action: CUAAction,
+    action: Action,
     url: string,
     instructionHash: string,
     currentScreenshotHash?: string,

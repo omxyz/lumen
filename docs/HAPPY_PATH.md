@@ -12,7 +12,7 @@ Annotated examples for the most common Lumen usage patterns. Each section is sel
 6. [Session resumption across processes](#6-session-resumption-across-processes)
 7. [Domain-restricted agent](#7-domain-restricted-agent)
 8. [Pre-action hook for audit logging](#8-pre-action-hook-for-audit-logging)
-9. [Custom completion gate](#9-custom-completion-gate)
+9. [Custom verifier](#9-custom-verifier)
 10. [Bring your own browser (CDP)](#10-bring-your-own-browser-cdp)
 11. [Browserbase (cloud)](#11-browserbase-cloud)
 12. [Custom / local model](#12-custom--local-model)
@@ -101,7 +101,7 @@ Using the TC39 `using` keyword (Node 22+, TypeScript 5.2+) for automatic cleanup
 `agent.stream()` returns a typed async iterable. Useful for rendering a live UI or writing a progress logger.
 
 ```typescript
-import { Agent, type CUAEvent } from "@omlabs/lumen";
+import { Agent, type StreamEvent } from "@omlabs/lumen";
 
 const agent = new Agent({
   model: "anthropic/claude-sonnet-4-6",
@@ -303,10 +303,10 @@ If the model tries to navigate to a blocked domain, the attempt is rejected and 
 Intercept every action before execution. Return `deny` to block, `allow` to pass.
 
 ```typescript
-import { Agent, type CUAAction } from "@omlabs/lumen";
+import { Agent, type Action } from "@omlabs/lumen";
 import { appendFileSync } from "fs";
 
-const actionLog: Array<{ ts: number; action: CUAAction }> = [];
+const actionLog: Array<{ ts: number; action: Action }> = [];
 
 const agent = new Agent({
   model: "anthropic/claude-sonnet-4-6",
@@ -339,19 +339,19 @@ await agent.close();
 
 ---
 
-## 9. Custom completion gate
+## 9. Custom verifier
 
 Prevent the loop from exiting until you have independently verified the task is done.
 
 ```typescript
 import { Agent, UrlMatchesGate, CustomGate } from "@omlabs/lumen";
 
-// Gate 1: URL must match a pattern
+// Verifier 1: URL must match a pattern
 const agent1 = new Agent({
   model: "anthropic/claude-sonnet-4-6",
   apiKey: process.env.ANTHROPIC_API_KEY,
   browser: { type: "local" },
-  completionGate: new UrlMatchesGate(/\/order\/\d+\/confirmation/),
+  verifier: new UrlMatchesGate(/\/order\/\d+\/confirmation/),
 });
 
 await agent1.run({
@@ -361,12 +361,12 @@ await agent1.run({
 
 await agent1.close();
 
-// Gate 2: Custom async predicate
+// Verifier 2: Custom async predicate
 const agent2 = new Agent({
   model: "anthropic/claude-sonnet-4-6",
   apiKey: process.env.ANTHROPIC_API_KEY,
   browser: { type: "local" },
-  completionGate: new CustomGate(
+  verifier: new CustomGate(
     async (screenshot, url) => {
       // Your own verification — could call an external API, check a DB, etc.
       return url.includes("/success") && url.includes("?ref=");
@@ -638,7 +638,7 @@ Implement `ModelAdapter` to integrate any model that is not natively supported.
 
 ```typescript
 import type { ModelAdapter, StepContext, ModelResponse } from "@omlabs/lumen";
-import type { CUAAction, WireMessage, TaskState } from "@omlabs/lumen";
+import type { Action, WireMessage, TaskState } from "@omlabs/lumen";
 
 class MyCustomAdapter implements ModelAdapter {
   readonly modelId = "my-model";
@@ -666,7 +666,7 @@ class MyCustomAdapter implements ModelAdapter {
     };
   }
 
-  async *stream(context: StepContext): AsyncIterable<CUAAction> {
+  async *stream(context: StepContext): AsyncIterable<Action> {
     // If your model doesn't support streaming, delegate to step():
     const response = await this.step(context);
     for (const action of response.actions) {

@@ -4,7 +4,7 @@ import { HistoryManager } from "../../src/loop/history.js";
 import { StateStore } from "../../src/loop/state.js";
 import { MockBrowserTab } from "./mock-tab.js";
 import { MockAdapter } from "./mock-adapter.js";
-import type { CUAAction } from "../../src/types.js";
+import type { Action } from "../../src/types.js";
 
 describe("PreActionHook integration in PerceptionLoop", () => {
   it("hook can deny an action and the loop continues without dispatching to browser", async () => {
@@ -21,7 +21,7 @@ describe("PreActionHook integration in PerceptionLoop", () => {
       adapter,
       history: new HistoryManager(100_000),
       state: new StateStore(),
-      preActionHook: async (action: CUAAction) => {
+      preActionHook: async (action: Action) => {
         if (action.type === "click") {
           deniedActions.push(action.type);
           return { decision: "deny", reason: "clicks not allowed in test" };
@@ -50,7 +50,7 @@ describe("PreActionHook integration in PerceptionLoop", () => {
       adapter,
       history: new HistoryManager(100_000),
       state: new StateStore(),
-      preActionHook: async (_action: CUAAction) => ({ decision: "allow" }),
+      preActionHook: async (_action: Action) => ({ decision: "allow" }),
     });
 
     await loop.run({ maxSteps: 10 });
@@ -71,7 +71,7 @@ describe("PreActionHook integration in PerceptionLoop", () => {
       adapter,
       history: new HistoryManager(100_000),
       state: new StateStore(),
-      preActionHook: async (_action: CUAAction) => {
+      preActionHook: async (_action: Action) => {
         hookOrder.push("hook");
         return { decision: "allow" };
       },

@@ -1,10 +1,10 @@
-import type { CUAAction, CUAEvent, CUAResult, LoopResult } from "../types.js";
+import type { Action, StreamEvent, RunResult, LoopResult } from "../types.js";
 import type { LoopMonitor } from "./monitor.js";
 import type { ModelResponse, StepContext } from "../model/adapter.js";
 import type { ActionExecution } from "../types.js";
 
 /**
- * A LoopMonitor that enqueues CUAEvent objects onto an internal queue.
+ * A LoopMonitor that enqueues StreamEvent objects onto an internal queue.
  * Used by Agent.stream() to convert the synchronous monitor callbacks into
  * an async iterable of events.
  *
@@ -13,10 +13,10 @@ import type { ActionExecution } from "../types.js";
  * the async generator terminates.
  */
 export class StreamingMonitor implements LoopMonitor {
-  private readonly queue: CUAEvent[] = [];
+  private readonly queue: StreamEvent[] = [];
   private resolver: (() => void) | null = null;
   private finished = false;
-  private finalResult: CUAResult | null = null;
+  private finalResult: RunResult | null = null;
 
   /** Await this to get the next event batch (resolves when queue is non-empty or done). */
   private _notify(): void {
@@ -27,13 +27,13 @@ export class StreamingMonitor implements LoopMonitor {
     }
   }
 
-  private enqueue(event: CUAEvent): void {
+  private enqueue(event: StreamEvent): void {
     this.queue.push(event);
     this._notify();
   }
 
   /** Called by the Agent after run() completes to signal end of stream. */
-  complete(result: CUAResult): void {
+  complete(result: RunResult): void {
     this.finalResult = result;
     this.finished = true;
     this.enqueue({ type: "done", result });
@@ -62,7 +62,7 @@ export class StreamingMonitor implements LoopMonitor {
     }
   }
 
-  actionExecuted(step: number, action: CUAAction, outcome: ActionExecution): void {
+  actionExecuted(step: number, action: Action, outcome: ActionExecution): void {
     this.enqueue({ type: "action", step, action });
     this.enqueue({ type: "action_result", step, action, ok: outcome.ok, error: outcome.error });
 
@@ -71,7 +71,7 @@ export class StreamingMonitor implements LoopMonitor {
     }
   }
 
-  actionBlocked(step: number, action: CUAAction, reason: string): void {
+  actionBlocked(step: number, action: Action, reason: string): void {
     this.enqueue({ type: "action_blocked", step, action, reason });
   }
 
@@ -94,7 +94,7 @@ export class StreamingMonitor implements LoopMonitor {
   // ─── Async generator ─────────────────────────────────────────────────────────
 
   /** Consume all events as an async iterable. Terminates after a "done" event. */
-  async *events(): AsyncIterable<CUAEvent> {
+  async *events(): AsyncIterable<StreamEvent> {
     while (true) {
       // Drain the queue
       while (this.queue.length > 0) {

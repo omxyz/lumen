@@ -1,4 +1,4 @@
-import type { CUAAction, LoopResult, SemanticStep } from "../types.js";
+import type { Action, LoopResult, SemanticStep } from "../types.js";
 import type { ActionExecution } from "../types.js";
 import type { ModelResponse } from "../model/adapter.js";
 import type { StepContext } from "../model/adapter.js";
@@ -6,8 +6,8 @@ import type { StepContext } from "../model/adapter.js";
 export interface LoopMonitor {
   stepStarted(step: number, context: StepContext): void;
   stepCompleted(step: number, response: ModelResponse): void;
-  actionExecuted(step: number, action: CUAAction, outcome: ActionExecution): void;
-  actionBlocked(step: number, action: CUAAction, reason: string): void;
+  actionExecuted(step: number, action: Action, outcome: ActionExecution): void;
+  actionBlocked(step: number, action: Action, reason: string): void;
   terminationRejected(step: number, reason: string): void;
   compactionTriggered(step: number, tokensBefore: number, tokensAfter: number): void;
   terminated(result: LoopResult): void;
@@ -25,13 +25,13 @@ export class ConsoleMonitor implements LoopMonitor {
     );
   }
 
-  actionExecuted(step: number, action: CUAAction, outcome: ActionExecution): void {
+  actionExecuted(step: number, action: Action, outcome: ActionExecution): void {
     if (!outcome.ok) {
       console.warn(`[lumen] step ${step + 1} action "${action.type}" failed: ${outcome.error}`);
     }
   }
 
-  actionBlocked(step: number, action: CUAAction, reason: string): void {
+  actionBlocked(step: number, action: Action, reason: string): void {
     console.warn(`[lumen] step ${step + 1} action "${action.type}" blocked: ${reason}`);
   }
 

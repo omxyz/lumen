@@ -1,15 +1,15 @@
 import type { ModelAdapter } from "./model/adapter.js";
 import type { BrowserTab } from "./browser/tab.js";
-import type { Verifier } from "./loop/gate.js";
+import type { Verifier } from "./loop/verifier.js";
 import type { LoopMonitor } from "./loop/monitor.js";
 import type { RouterTiming } from "./loop/router.js";
 import type { SessionPolicyOptions } from "./loop/policy.js";
 import { Session } from "./session.js";
 import { LumenLogger } from "./logger.js";
 import type {
-  AgentEvent,
   AgentOptions,
-  AgentResult,
+  RunResult,
+  StreamEvent,
   BrowserOptions,
   RunOptions,
   SemanticStep,
@@ -260,7 +260,7 @@ export class Agent {
       timing: this.options.timing,
       policy: this.options.policy,
       preActionHook: this.options.preActionHook,
-      completionGate: this.options.completionGate,
+      verifier: this.options.verifier,
       monitor,
       compactionAdapter,
       initialHistory,
@@ -272,7 +272,7 @@ export class Agent {
     log.info(`[lumen] connected and ready`);
   }
 
-  async run(options: RunOptions): Promise<AgentResult> {
+  async run(options: RunOptions): Promise<RunResult> {
     await this._connect();
 
     this._log?.info(
@@ -311,7 +311,7 @@ export class Agent {
         timing: this.options.timing,
         policy: this.options.policy,
         preActionHook: this.options.preActionHook,
-        completionGate: this.options.completionGate,
+        verifier: this.options.verifier,
         compactionAdapter,
         initialHistory: this._pendingHistory ?? this.options.initialHistory,
         initialState: this.options.initialState,
@@ -354,7 +354,7 @@ export class Agent {
     return this._session!.run({ ...options });
   }
 
-  async *stream(options: RunOptions): AsyncIterable<AgentEvent> {
+  async *stream(options: RunOptions): AsyncIterable<StreamEvent> {
     const { StreamingMonitor } = await import("./loop/streaming-monitor.js");
     const streamingMonitor = new StreamingMonitor();
 
@@ -389,7 +389,7 @@ export class Agent {
       timing: this.options.timing,
       policy: this.options.policy,
       preActionHook: this.options.preActionHook,
-      completionGate: this.options.completionGate,
+      verifier: this.options.verifier,
       monitor,
       compactionAdapter,
       log: this._log ?? undefined,
@@ -465,7 +465,7 @@ export class Agent {
   }
 
   /** Convenience: create agent, run, close */
-  static async run(options: AgentOptions & RunOptions): Promise<AgentResult> {
+  static async run(options: AgentOptions & RunOptions): Promise<RunResult> {
     const agent = new Agent(options);
     try {
       return await agent.run({ instruction: options.instruction, maxSteps: options.maxSteps, startUrl: options.startUrl });

@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import type { ModelAdapter, StepContext } from "./adapter.js";
 import type { ModelResponse } from "./adapter.js";
-import type { CUAAction, TaskState, WireMessage } from "../types.js";
+import type { Action, TaskState, WireMessage } from "../types.js";
 import { ActionDecoder } from "./decoder.js";
 
 const decoder = new ActionDecoder();
@@ -214,7 +214,7 @@ export class CustomAdapter implements ModelAdapter {
       tool_choice: "required",
     });
 
-    const actions: CUAAction[] = [];
+    const actions: Action[] = [];
     const customViewport = { width: context.screenshot.width, height: context.screenshot.height };
     const choice = response.choices[0];
     if (choice?.message?.tool_calls) {
@@ -238,7 +238,7 @@ export class CustomAdapter implements ModelAdapter {
     };
   }
 
-  async *stream(context: StepContext): AsyncIterable<CUAAction> {
+  async *stream(context: StepContext): AsyncIterable<Action> {
     const response = await this.step(context);
     for (const action of response.actions) yield action;
   }

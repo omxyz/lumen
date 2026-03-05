@@ -1,12 +1,12 @@
-import type { CUAAction, TaskState, ViewportSize } from "../types.js";
+import type { Action, TaskState, ViewportSize } from "../types.js";
 import { denormalize } from "./adapter.js";
 
 export class ActionDecoder {
-  /** Anthropic tool_use block → CUAAction. Coordinates are pixels — pass through directly. */
+  /** Anthropic tool_use block → Action. Coordinates are pixels — pass through directly. */
   fromAnthropic(
     block: { name: string; input: Record<string, unknown> },
     _viewport: ViewportSize,
-  ): CUAAction {
+  ): Action {
     const { name, input } = block;
 
     if (name === "computer") {
@@ -75,11 +75,11 @@ export class ActionDecoder {
     return { type: "screenshot" };
   }
 
-  /** Google function_call → CUAAction. Coordinates are 0-1000 → denormalize to pixels. */
+  /** Google function_call → Action. Coordinates are 0-1000 → denormalize to pixels. */
   fromGoogle(
     call: { name: string; args: Record<string, unknown> },
     viewport: ViewportSize,
-  ): CUAAction {
+  ): Action {
     const { name, args } = call;
 
     // Legacy computer_use tool (older Google models)
@@ -199,11 +199,11 @@ export class ActionDecoder {
     return { type: "screenshot" };
   }
 
-  /** OpenAI computer_call → CUAAction. Coordinates are pixels — pass through directly. */
+  /** OpenAI computer_call → Action. Coordinates are pixels — pass through directly. */
   fromOpenAI(
     call: { type: string; action?: Record<string, unknown> },
     _viewport: ViewportSize,
-  ): CUAAction {
+  ): Action {
     if (call.type !== "computer_call" || !call.action) return { type: "screenshot" };
     const action = call.action;
     const actionType = action.type as string;
@@ -244,11 +244,11 @@ export class ActionDecoder {
     return { type: "screenshot" };
   }
 
-  /** Generic function call → CUAAction. Coordinates are 0-1000 → denormalize to pixels. */
+  /** Generic function call → Action. Coordinates are 0-1000 → denormalize to pixels. */
   fromGeneric(
     call: { name: string; input: Record<string, unknown> },
     viewport: ViewportSize,
-  ): CUAAction {
+  ): Action {
     const { name, input } = call;
 
     switch (name) {

@@ -2,6 +2,28 @@
 
 Deep dive into every layer of the engine. Start here if you are extending Lumen, writing a custom adapter, or debugging surprising behavior.
 
+## Design Principles
+
+These principles guided every architectural decision. They explain *why* the system is structured this way.
+
+1. **The loop is the architecture.** Screenshot → model → action(s) → screenshot. Every feature (compression, safety, caching, delegation) is a hook on this loop, not a parallel system. There is exactly one place where the model is called, one place where actions execute, and one place where history is recorded.
+
+2. **Errors are context, not exceptions.** A misclick, a stale element, a policy violation — these are normal events in browser automation. They are returned as `ActionExecution.ok = false` and fed back to the model as context. Only truly fatal errors (CDP socket disconnect) throw. This lets the model self-correct.
+
+3. **Terminate is a request, not a command.** The model's `terminate` action asks to exit. If a `Verifier` is configured, the loop independently confirms the task is actually done. A rejected termination becomes feedback: "terminate rejected — condition not met." The model retries.
+
+4. **Structured state survives compression.** The `writeState` action persists structured JSON in `StateStore`. This state is re-injected every step and survives tier-2 LLM summarization. The model can checkpoint progress mid-task without it being compressed away.
+
+5. **Screenshots are the bottleneck.** A single screenshot is 40–100KB of base64. Tier-1 compression (null out old screenshots) handles most token savings. Tier-2 (LLM summarization) is a last resort triggered at 80% context utilization.
+
+6. **Coordinates convert once, at decode time.** Each provider emits coordinates differently (Anthropic/OpenAI: pixels; Google: 0–1000). `ActionDecoder` converts to viewport pixels at decode time. After that, every layer speaks pixels — no conversion in the router, no conversion in the browser.
+
+7. **The adapter is a codec, not a controller.** `ModelAdapter` translates between the loop's universal format and the provider's wire protocol. It does not make decisions about when to call the model, how to handle errors, or when to compact. Those are the loop's job.
+
+8. **Safety is layered.** `PreActionHook` (imperative) → `SessionPolicy` (declarative) → `Verifier` (completion). Each layer can block independently. Blocked actions become error context for the model.
+
+---
+
 ## Table of Contents
 
 - [Layered Overview](#layered-overview)
@@ -28,7 +50,7 @@ Deep dive into every layer of the engine. Start here if you are extending Lumen,
 - [Safety layer](#safety-layer)
   - [SessionPolicy](#sessionpolicy)
   - [PreActionHook](#preactionhook)
-  - [CompletionGate](#completiongate)
+  - [Verifier](#verifier)
 - [ChildLoop (delegation)](#childloop-delegation)
 - [RepeatDetector](#repeatdetector)
 - [ActionCache](#actioncache)
@@ -61,7 +83,7 @@ Deep dive into every layer of the engine. Start here if you are extending Lumen,
 ┌───────────────────────────▼─────────────────────────────┐
 │                    PerceptionLoop                        │
 │  screenshot → model.stream() → router.execute() → ...    │
-│  compaction · policy · gate · child delegation           │
+│  compaction · policy · verifier · child delegation           │
 └─────┬────────────────┬───────────────┬──────────────────┘
       │                │               │
 ┌─────▼──────┐  ┌──────▼──────┐ ┌─────▼──────┐
@@ -97,7 +119,7 @@ Every step of the perception loop follows this sequence:
    b. SessionPolicy check
    c. ActionRouter.execute()
    d. Buffer outcome (not written to wire yet)
-   e. If terminate: verify with CompletionGate, drain stream
+   e. If terminate: verify with Verifier, drain stream
    f. Repeat detection (RepeatDetector.record) — stash nudge for next step
    g. If delegate: run ChildLoop
 7. Record assistant turn in wire history (adapter.getLastStreamResponse)
@@ -126,7 +148,7 @@ The wire history is a flat array of tagged records:
 ```typescript
 type WireMessage =
   | { role: "screenshot"; base64: string | null; stepIndex: number; compressed: boolean }
-  | { role: "assistant"; actions: CUAAction[]; tool_call_ids?: string[]; thinking?: string }
+  | { role: "assistant"; actions: Action[]; tool_call_ids?: string[]; thinking?: string }
   | { role: "tool_result"; tool_call_id: string; action: string; ok: boolean; error?: string }
   | { role: "summary"; content: string; compactedAt: number }
 ```
@@ -160,7 +182,7 @@ Every coordinate in the codebase lives in one of two spaces:
 | Space | Range | Who uses it |
 |---|---|---|
 | **Provider-native** | Varies per provider | Raw model output before decoding |
-| **Pixels** (PixelCoord) | 0–width/height | CUAAction, ActionRouter, BrowserTab |
+| **Pixels** (number) | 0–width/height | Action, ActionRouter, BrowserTab |
 
 Coordinate conversion happens at **decode time** inside `ActionDecoder`, not in `ActionRouter`:
 
@@ -169,7 +191,7 @@ Coordinate conversion happens at **decode time** inside `ActionDecoder`, not in 
 - **OpenAI**: `computer-use-preview` emits pixel coordinates — passed through directly.
 - **Custom/Generic**: `fromGeneric()` expects 0–1000 — `denormalize()` converts to pixels.
 
-By the time a `CUAAction` reaches `ActionRouter`, all coordinates are in viewport pixels. The router dispatches them directly without any conversion:
+By the time an `Action` reaches `ActionRouter`, all coordinates are in viewport pixels. The router dispatches them directly without any conversion:
 
 ```typescript
 // src/loop/router.ts — no coordinate conversion
@@ -208,7 +230,7 @@ Every agent session maintains two parallel histories:
 **Semantic history** (`HistoryManager.semantic: SemanticStep[]`)
 - Human/developer-facing. Never compressed or mutated.
 - Contains full screenshots, thinking text, all actions and their outcomes, token counts, timing.
-- Returned in `AgentResult.history` and `agent.history()`.
+- Returned in `RunResult.history` and `agent.history()`.
 - Used for debugging, auditing, and replay.
 
 ### Tier-1: Screenshot compression
@@ -264,13 +286,13 @@ Task state: {"min_price":"£3.49","min_title":"Sharp Objects"}
 ## ActionRouter
 
 `ActionRouter` is the single place where:
-1. CUAActions (already in pixel coordinates) are dispatched to the appropriate `BrowserTab` method.
+1. Actions (already in pixel coordinates) are dispatched to the appropriate `BrowserTab` method.
 2. Post-action sleep delays are applied.
 3. Special actions (`writeState`, `terminate`, `delegate`, `screenshot`) are handled without touching the browser.
 4. Errors from `BrowserTab` are caught and returned as `ActionExecution` objects (never thrown).
 
 ```typescript
-execute(action: CUAAction, tab: BrowserTab, state: StateStore): Promise<ActionExecution>
+execute(action: Action, tab: BrowserTab, state: StateStore): Promise<ActionExecution>
 ```
 
 `ActionExecution` carries:
@@ -305,7 +327,7 @@ interface ModelAdapter {
   readonly nativeComputerUse: boolean;   // Uses provider's computer-use tool
   readonly contextWindowTokens: number;  // For compaction threshold calculation
 
-  stream(context: StepContext): AsyncIterable<CUAAction>;  // Primary
+  stream(context: StepContext): AsyncIterable<Action>;  // Primary
   step(context: StepContext): Promise<ModelResponse>;       // Single-shot
 
   estimateTokens(context: StepContext): number;
@@ -321,7 +343,7 @@ The loop uses `stream()` exclusively. `step()` is used by the planner and by `Cu
 - `contextWindowTokens: 200_000`
 - `patchSize: 28`, `maxImageDimension: 1344` (used by `ViewportManager`)
 - Selects `computer_20251124` for Claude 4.x models, `computer_20250124` for older.
-- Streaming: parses `content_block_delta` events, yields each `CUAAction` when its `content_block_stop` arrives.
+- Streaming: parses `content_block_delta` events, yields each `Action` when its `content_block_stop` arrives.
 - Thinking: accumulates `thinking_delta` events; exposed in `ModelResponse.thinking`.
 - Summarization: uses `claude-haiku-4-5-20251001` (cheap, fast).
 - Maintains `_lastStreamResponse` so `PerceptionLoop` can call `appendResponse()` after the stream.
@@ -403,7 +425,7 @@ For Anthropic models (`patchSize: 28`, `maxImageDimension: 1344`), this snaps th
 interface SessionPolicyOptions {
   allowedDomains?: string[];   // glob: "*.myco.com"
   blockedDomains?: string[];
-  allowedActions?: CUAAction["type"][];
+  allowedActions?: Action["type"][];
 }
 ```
 
@@ -419,16 +441,16 @@ Runs before `SessionPolicy`. Can be async. Returns:
 
 Use cases: rate limiting, audit logging, custom allow/deny rules that depend on external state.
 
-### CompletionGate
+### Verifier
 
-Called when the model emits a `terminate` action. The gate receives the current screenshot and URL and returns `{ passed: boolean; reason?: string }`.
+Called when the model emits a `terminate` action. The verifier receives the current screenshot and URL and returns `{ passed: boolean; reason?: string }` (`VerifyResult`).
 
-If the gate fails, the termination is rejected and the loop continues — the error reason is fed back to the model so it can try to reach the actual completion condition.
+If the verifier fails, the termination is rejected and the loop continues — the error reason is fed back to the model so it can try to reach the actual completion condition.
 
-Built-in gates:
+Built-in verifiers:
 - `UrlMatchesGate(pattern: RegExp)` — passes if the current URL matches the pattern.
 - `CustomGate(fn, failureReason)` — passes if `fn(screenshot, url)` resolves to `true`.
-- `ModelVerifier(adapter, task, maxAttempts?)` — uses the model itself to judge task completion from the screenshot. Hard-passes after `maxAttempts` (default: 2) to prevent infinite gate loops.
+- `ModelVerifier(adapter, task, maxAttempts?)` — uses the model itself to judge task completion from the screenshot. Hard-passes after `maxAttempts` (default: 2) to prevent infinite verifier loops.
 
 ---
 
@@ -517,8 +539,8 @@ The planner can use a different, cheaper model than the main agent. The plan is 
 interface LoopMonitor {
   stepStarted(step: number, context: StepContext): void;
   stepCompleted(step: number, response: ModelResponse): void;
-  actionExecuted(step: number, action: CUAAction, outcome: ActionExecution): void;
-  actionBlocked(step: number, action: CUAAction, reason: string): void;
+  actionExecuted(step: number, action: Action, outcome: ActionExecution): void;
+  actionBlocked(step: number, action: Action, reason: string): void;
   terminationRejected(step: number, reason: string): void;
   compactionTriggered(step: number, tokensBefore: number, tokensAfter: number): void;
   terminated(result: LoopResult): void;
@@ -546,7 +568,7 @@ const agent = new Agent({
 
 ### StreamingMonitor
 
-`StreamingMonitor` is an internal `LoopMonitor` implementation that translates monitor events into `CUAEvent` objects and buffers them in an async queue. `agent.stream()` wraps the monitor queue in an `AsyncIterableIterator`, running the actual loop in the background.
+`StreamingMonitor` is an internal `LoopMonitor` implementation that translates monitor events into `StreamEvent` objects and buffers them in an async queue. `agent.stream()` wraps the monitor queue in an `AsyncIterableIterator`, running the actual loop in the background.
 
 The queue is unbounded — if the consumer is slow, events accumulate in memory. For production use, make sure to consume events promptly.
 
@@ -577,13 +599,13 @@ The queue is unbounded — if the consumer is slow, events accumulate in memory.
 `Session` is a lower-level API for callers that want to own the browser and adapter themselves. It assembles `HistoryManager`, `StateStore`, `SessionPolicy`, and `PerceptionLoop` from options.
 
 ```typescript
-import { CUASession, CDPTab, CdpConnection, AnthropicAdapter } from "@omlabs/lumen";
+import { Session, CDPTab, CdpConnection, AnthropicAdapter } from "@omlabs/lumen";
 
 const conn = await CdpConnection.connect("ws://localhost:9222/...");
 const tab = new CDPTab(conn.mainSession());
 const adapter = new AnthropicAdapter("claude-sonnet-4-6", apiKey);
 
-const session = new CUASession({ tab, adapter, maxSteps: 20 });
+const session = new Session({ tab, adapter, maxSteps: 20 });
 await session.init();
 
 const result = await session.run({ instruction: "..." });
@@ -602,12 +624,12 @@ Lumen has a deliberate two-tier error model:
 
 Any error that occurs during action execution (a click on a stale element, a navigation timeout, a policy violation) is returned as `ActionExecution.ok = false` and injected as an `is_error: true` tool result into the model's context. The loop continues; the model has the opportunity to self-correct.
 
-**Fatal errors — thrown as `CUAError`**
+**Fatal errors — thrown as `LumenError`**
 
-Only `BROWSER_DISCONNECTED` (the CDP socket closed unexpectedly) propagates out of the loop as a thrown `CUAError`. Other `CUAErrorCode` values are defined for future use:
+Only `BROWSER_DISCONNECTED` (the CDP socket closed unexpectedly) propagates out of the loop as a thrown `LumenError`. Other `LumenErrorCode` values are defined for future use:
 
 ```typescript
-type CUAErrorCode =
+type LumenErrorCode =
   | "BROWSER_DISCONNECTED"
   | "MODEL_API_ERROR"
   | "SESSION_TIMEOUT"
@@ -629,7 +651,7 @@ src/index.ts          ← public surface
         src/loop/router.ts        ← ActionRouter
         src/loop/state.ts         ← StateStore
         src/loop/policy.ts        ← SessionPolicy
-        src/loop/gate.ts          ← CompletionGate
+        src/loop/verifier.ts      ← Verifier
         src/loop/monitor.ts       ← LoopMonitor
         src/loop/child.ts         ← ChildLoop
         src/loop/repeat-detector.ts ← RepeatDetector
@@ -651,9 +673,28 @@ src/index.ts          ← public surface
           browserbase.ts          ← connectBrowserbase
     src/loop/planner.ts           ← runPlanner
     src/loop/streaming-monitor.ts ← StreamingMonitor
-  src/errors.ts       ← CUAError
+  src/errors.ts       ← LumenError
   src/logger.ts         ← LumenLogger
   src/types.ts        ← all shared types
 ```
 
 All cross-module imports use the `.js` extension (ESM requirement). Circular dependencies are avoided; the dependency direction is always top-down.
+
+---
+
+## Performance: SOTA Patterns
+
+Lumen achieves **96.0% (24/25)** on WebVoyager (Stagehand methodology). The architecture was designed with extension points that map directly to patterns from state-of-the-art systems:
+
+| SOTA Pattern | Source | Lumen Equivalent |
+|---|---|---|
+| Persistent context across subtasks | Surfer 2 (97.1%) | `StateStore` + session resumption |
+| Validator verifies task completion | Surfer 2 | `Verifier` (Surfer 2's Validator = Lumen's `ModelVerifier`) |
+| Orchestrator plans subtasks | Surfer 2 | `plannerModel` option (optional pre-loop planning pass) |
+| Prompt caching for latency | Magnitude (93.9%) | `cache_control` markers in `AnthropicAdapter` |
+| Observation masking (limit screenshots) | Magnitude | Tier-1 screenshot compression (`keepRecentScreenshots: 2`) |
+| Deterministic caching for repeated patterns | Magnitude | `ActionCache` (on-disk, keyed by action+url+instruction) |
+| Centralized state management | AIME/ByteDance (92.3%) | `StateStore` with `writeState` action |
+| CDP post-action verification | Surfer 2 Validator | Form state extraction + nudge injection (no extra model call) |
+
+The key insight: these patterns were anticipated in the original design. Surfer 2's 30–40% step reduction from "persistent context" maps to `StateStore` + session persistence. Surfer 2's Validator catching 15–20% of false terminations maps to `Verifier`. The architecture accommodates these optimizations without structural changes.

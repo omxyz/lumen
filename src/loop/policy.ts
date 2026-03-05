@@ -1,4 +1,4 @@
-import type { CUAAction } from "../types.js";
+import type { Action } from "../types.js";
 
 export interface SessionPolicyResult {
   allowed: boolean;
@@ -11,7 +11,7 @@ export interface SessionPolicyOptions {
   allowedDomains?: string[];
   blockedDomains?: string[];
   /** Restrict which action types the model may emit. */
-  allowedActions?: CUAAction["type"][];
+  allowedActions?: Action["type"][];
 }
 
 /** Allowlist filter checked before every model-emitted action.
@@ -20,7 +20,7 @@ export interface SessionPolicyOptions {
 export class SessionPolicy {
   constructor(private readonly options: SessionPolicyOptions) {}
 
-  check(action: CUAAction): SessionPolicyResult {
+  check(action: Action): SessionPolicyResult {
     // Action type filter
     if (
       this.options.allowedActions &&

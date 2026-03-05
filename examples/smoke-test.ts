@@ -28,7 +28,7 @@ import { tmpdir } from "os";
 import type { ModelAdapter, StepContext, ModelResponse } from "../src/model/adapter.js";
 import type { BrowserTab, ClickOptions, DragOptions, TypeOptions } from "../src/browser/tab.js";
 import type {
-  CUAAction, TaskState, WireMessage,
+  Action, TaskState, WireMessage,
   ActionOutcome, ScreenshotOptions, ScreenshotResult, ViewportSize,
 } from "../src/types.js";
 
@@ -37,11 +37,11 @@ class MockAdapter implements ModelAdapter {
   readonly provider = "mock";
   readonly nativeComputerUse = false;
   readonly contextWindowTokens = 100_000;
-  private actionQueue: CUAAction[][] = [];
+  private actionQueue: Action[][] = [];
   private stepCount = 0;
   private _lastStreamResponse: ModelResponse | null = null;
 
-  queueActions(actions: CUAAction[]): this {
+  queueActions(actions: Action[]): this {
     this.actionQueue.push(actions);
     return this;
   }
@@ -62,7 +62,7 @@ class MockAdapter implements ModelAdapter {
     return this._lastStreamResponse;
   }
 
-  async *stream(context: StepContext): AsyncIterable<CUAAction> {
+  async *stream(context: StepContext): AsyncIterable<Action> {
     const response = await this.step(context);
     for (const action of response.actions) yield action;
   }
@@ -119,7 +119,7 @@ async function main() {
   console.log("RepeatDetector:");
   {
     const detector = new RepeatDetector();
-    const action: CUAAction = { type: "click", x: 500, y: 500 };
+    const action: Action = { type: "click", x: 500, y: 500 };
     let triggered = false;
     for (let i = 0; i < 5; i++) {
       const result = detector.record(action);
@@ -143,7 +143,7 @@ async function main() {
     assert(miss === null, "returns null for cache miss");
 
     // Cache hit
-    const action: CUAAction = { type: "click", x: 500, y: 300 };
+    const action: Action = { type: "click", x: 500, y: 300 };
     await cache.set(key, action, "https://example.com", "abc123", "hash1");
     const hit = await cache.get(key, "hash1");
     assert(hit !== null && hit.type === "click", "stores and retrieves cached action");

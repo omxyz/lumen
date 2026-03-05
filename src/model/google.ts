@@ -2,7 +2,7 @@ import { GoogleGenAI, Environment } from "@google/genai";
 import type { ModelAdapter, StepContext } from "./adapter.js";
 import type { ModelResponse } from "./adapter.js";
 import { withRetry } from "./adapter.js";
-import type { CUAAction, TaskState, WireMessage } from "../types.js";
+import type { Action, TaskState, WireMessage } from "../types.js";
 import { ActionDecoder } from "./decoder.js";
 
 const decoder = new ActionDecoder();
@@ -192,7 +192,7 @@ export class GoogleAdapter implements ModelAdapter {
         }
 
         // Decode action calls and return them to PerceptionLoop
-        const actions: CUAAction[] = [];
+        const actions: Action[] = [];
         const googleViewport = { width: context.screenshot.width, height: context.screenshot.height };
         for (const fc of actionCalls) {
           const action = decoder.fromGoogle({
@@ -230,7 +230,7 @@ export class GoogleAdapter implements ModelAdapter {
     return this._lastStreamResponse;
   }
 
-  async *stream(context: StepContext): AsyncIterable<CUAAction> {
+  async *stream(context: StepContext): AsyncIterable<Action> {
     // Delegate to step() for correct token tracking; cache response for PerceptionLoop
     try {
       const response = await this.step(context);

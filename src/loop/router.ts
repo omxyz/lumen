@@ -1,5 +1,5 @@
 import type { BrowserTab } from "../browser/tab.js";
-import type { ActionExecution, CUAAction, TaskState } from "../types.js";
+import type { ActionExecution, Action, TaskState } from "../types.js";
 import type { StateStore } from "./state.js";
 import { LumenLogger } from "../logger.js";
 
@@ -12,7 +12,7 @@ export interface RouterTiming {
   afterNavigation?: number;  // Default: 1000ms
 }
 
-/** Translates CUAAction objects (pixel coords) into browser operations.
+/** Translates Action objects (pixel coords) into browser operations.
  *  Coordinates are already in viewport pixels — no conversion needed.
  *  Errors are returned as ActionExecution, never thrown. */
 export class ActionRouter {
@@ -24,7 +24,7 @@ export class ActionRouter {
   ) {}
 
   async execute(
-    action: CUAAction,
+    action: Action,
     tab: BrowserTab,
     state: StateStore,
   ): Promise<ActionExecution> {

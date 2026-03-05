@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import type { ModelAdapter, StepContext } from "./adapter.js";
 import type { ModelResponse } from "./adapter.js";
 import { withRetry } from "./adapter.js";
-import type { CUAAction, TaskState, WireMessage } from "../types.js";
+import type { Action, TaskState, WireMessage } from "../types.js";
 import { ActionDecoder } from "./decoder.js";
 
 const decoder = new ActionDecoder();
@@ -69,7 +69,7 @@ export class OpenAIAdapter implements ModelAdapter {
     const response = await withRetry(() => this.client.responses.create(params));
     this.previousResponseId = response.id;
 
-    const actions: CUAAction[] = [];
+    const actions: Action[] = [];
     for (const item of response.output ?? []) {
       if (item.type === "computer_call") {
         actions.push(decoder.fromOpenAI(
@@ -95,7 +95,7 @@ export class OpenAIAdapter implements ModelAdapter {
     return this._lastStreamResponse;
   }
 
-  async *stream(context: StepContext): AsyncIterable<CUAAction> {
+  async *stream(context: StepContext): AsyncIterable<Action> {
     // Delegate to step() for correct token tracking; cache response for PerceptionLoop
     const response = await this.step(context);
     this._lastStreamResponse = response;

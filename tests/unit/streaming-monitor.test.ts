@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { StreamingMonitor } from "../../src/loop/streaming-monitor.js";
-import type { CUAAction, CUAResult } from "../../src/types.js";
+import type { Action, RunResult } from "../../src/types.js";
 import type { ModelResponse, StepContext } from "../../src/model/adapter.js";
 
 const mockScreenshot = {
@@ -20,12 +20,12 @@ const mockContext: StepContext = {
 };
 
 const mockResponse: ModelResponse = {
-  actions: [{ type: "click", x: 500, y: 500 } as CUAAction],
+  actions: [{ type: "click", x: 500, y: 500 } as Action],
   usage: { inputTokens: 100, outputTokens: 50 },
   rawResponse: null,
 };
 
-const mockResult: CUAResult = {
+const mockResult: RunResult = {
   status: "success",
   result: "done",
   steps: 1,
@@ -85,7 +85,7 @@ describe("StreamingMonitor", () => {
 
   it("emits action and action_result events on actionExecuted", async () => {
     const monitor = new StreamingMonitor();
-    const action: CUAAction = { type: "click", x: 500, y: 500 };
+    const action: Action = { type: "click", x: 500, y: 500 };
 
     monitor.actionExecuted(0, action, { ok: true });
     monitor.complete(mockResult);
@@ -101,7 +101,7 @@ describe("StreamingMonitor", () => {
 
   it("emits state_written event when writeState action is executed", async () => {
     const monitor = new StreamingMonitor();
-    const action: CUAAction = { type: "writeState", data: { min_price: "£3.49" } };
+    const action: Action = { type: "writeState", data: { min_price: "£3.49" } };
 
     monitor.actionExecuted(0, action, { ok: true });
     monitor.complete(mockResult);
@@ -120,7 +120,7 @@ describe("StreamingMonitor", () => {
 
   it("emits action_blocked event on actionBlocked", async () => {
     const monitor = new StreamingMonitor();
-    const action: CUAAction = { type: "goto", url: "https://evil.com" };
+    const action: Action = { type: "goto", url: "https://evil.com" };
 
     monitor.actionBlocked(0, action, "domain not allowed");
     monitor.complete(mockResult);

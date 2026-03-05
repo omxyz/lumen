@@ -257,7 +257,7 @@ Lumen's viewport alignment is unique: it snaps the viewport to the model's optim
 
 - **LumenLogger**: 6 surface-specific debug channels (`LUMEN_LOG_CDP`, `LUMEN_LOG_ACTIONS`, `LUMEN_LOG_BROWSER`, `LUMEN_LOG_HISTORY`, `LUMEN_LOG_ADAPTER`, `LUMEN_LOG_LOOP`)
 - **LoopMonitor**: Event callbacks for step/action/compaction lifecycle
-- **StreamingMonitor**: Typed `CUAEvent` async iterable for real-time UIs
+- **StreamingMonitor**: Typed `StreamEvent` async iterable for real-time UIs
 - **Semantic history**: Immutable audit trail with full screenshots, always available regardless of compaction
 
 ### Stagehand
@@ -371,7 +371,7 @@ Lumen also includes a WebVoyager evaluation (`evals/webvoyager/`) matching Stage
 | **No-code / workflow builder** | **Skyvern** | Visual workflow editor, authentication support, cloud infrastructure |
 | **Safety-critical automation** | **Lumen** | Policy + hooks + gates provide layered defense; full audit trail |
 | **Non-vision models (GPT-3.5, Llama)** | **Stagehand** or **browser-use** | DOM/a11y modes work without vision capabilities |
-| **Multi-provider comparison** | **Lumen** | Native adapters for Anthropic/Google/OpenAI with unified CUAAction format |
+| **Multi-provider comparison** | **Lumen** | Native adapters for Anthropic/Google/OpenAI with unified Action format |
 | **Python ecosystem** | **browser-use** or **Skyvern** | Lumen and Stagehand are TypeScript-only |
 | **Maximum reliability** | **Lumen** | Repeat detection, form state extraction, completion gates, and retry backoff cover common failure modes |
 | **Cross-browser testing** | **Skyvern** | Playwright enables Firefox and WebKit alongside Chrome |

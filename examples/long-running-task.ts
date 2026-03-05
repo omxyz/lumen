@@ -19,7 +19,7 @@
  */
 
 import { Agent } from "../src/index.js";
-import { ModelVerifier } from "../src/loop/gate.js";
+import { ModelVerifier } from "../src/loop/verifier.js";
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
@@ -63,7 +63,7 @@ async function main() {
     maxSteps: TASK.maxSteps,
     verbose: 2,
     // ModelVerifier: confirms the agent actually gathered all 8 stories before accepting terminate
-    completionGate: new ModelVerifier(
+    verifier: new ModelVerifier(
       // Use a separate lightweight adapter instance for verification
       await createVerifierAdapter(model),
       "Return a numbered list of 8 stories (top 5 from page 1 + top 3 from page 2) with title, points, and comments for each.",

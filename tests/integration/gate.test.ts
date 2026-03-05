@@ -2,24 +2,24 @@ import { describe, it, expect } from "vitest";
 import { PerceptionLoop } from "../../src/loop/perception.js";
 import { HistoryManager } from "../../src/loop/history.js";
 import { StateStore } from "../../src/loop/state.js";
-import { CustomGate } from "../../src/loop/gate.js";
+import { CustomGate } from "../../src/loop/verifier.js";
 import { MockBrowserTab } from "./mock-tab.js";
 import { MockAdapter } from "./mock-adapter.js";
 
-describe("CompletionGate integration in PerceptionLoop", () => {
-  it("rejects terminate when gate fails and loop continues", async () => {
+describe("Verifier integration in PerceptionLoop", () => {
+  it("rejects terminate when verifier fails and loop continues", async () => {
     const adapter = new MockAdapter();
-    // First step: try to terminate (gate will reject)
+    // First step: try to terminate (verifier will reject)
     adapter.queueActions([{ type: "terminate", status: "success", result: "done too early" }]);
-    // Second step: terminate again (gate will pass this time)
+    // Second step: terminate again (verifier will pass this time)
     adapter.queueActions([{ type: "terminate", status: "success", result: "actually done" }]);
 
     const tab = new MockBrowserTab();
-    let gateCallCount = 0;
-    // Gate fails first time, passes second time
-    const gate = new CustomGate(async () => {
-      gateCallCount++;
-      return gateCallCount > 1;
+    let verifierCallCount = 0;
+    // Verifier fails first time, passes second time
+    const verifier = new CustomGate(async () => {
+      verifierCallCount++;
+      return verifierCallCount > 1;
     }, "not ready yet");
 
     const history = new HistoryManager(100_000);
@@ -28,7 +28,7 @@ describe("CompletionGate integration in PerceptionLoop", () => {
       adapter,
       history,
       state: new StateStore(),
-      gate,
+      verifier,
     });
 
     const result = await loop.run({ maxSteps: 10 });
@@ -37,22 +37,22 @@ describe("CompletionGate integration in PerceptionLoop", () => {
     expect(result.status).toBe("success");
     expect(result.result).toBe("actually done");
     expect(result.steps).toBe(2);
-    expect(gateCallCount).toBe(2);
+    expect(verifierCallCount).toBe(2);
   });
 
-  it("accepts terminate immediately when gate passes", async () => {
+  it("accepts terminate immediately when verifier passes", async () => {
     const adapter = new MockAdapter();
     adapter.queueActions([{ type: "terminate", status: "success", result: "task complete" }]);
 
     const tab = new MockBrowserTab();
-    const gate = new CustomGate(async () => true);
+    const verifier = new CustomGate(async () => true);
 
     const loop = new PerceptionLoop({
       tab,
       adapter,
       history: new HistoryManager(100_000),
       state: new StateStore(),
-      gate,
+      verifier,
     });
 
     const result = await loop.run({ maxSteps: 5 });

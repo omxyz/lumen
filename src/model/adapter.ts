@@ -1,4 +1,4 @@
-import type { CUAAction, ScreenshotResult, TaskState, TokenUsage, ViewportSize, WireMessage } from "../types.js";
+import type { Action, ScreenshotResult, TaskState, TokenUsage, ViewportSize, WireMessage } from "../types.js";
 
 // ─── Retry utility ───────────────────────────────────────────────────────────
 
@@ -38,7 +38,7 @@ export interface StepContext {
 }
 
 export interface ModelResponse {
-  actions: CUAAction[];
+  actions: Action[];
   /** Stable IDs assigned to each tool call, parallel to `actions[]`.
    *  Used to correlate tool_result messages with their tool_use messages.
    *  Must be populated by adapters that use the Anthropic message format. */
@@ -62,7 +62,7 @@ export interface ModelAdapter {
 
   /** Streaming variant — yields actions as each tool call input block completes.
    *  PerceptionLoop executes each action immediately without waiting for message_stop. */
-  stream(context: StepContext): AsyncIterable<CUAAction>;
+  stream(context: StepContext): AsyncIterable<Action>;
 
   /** Single-shot variant — waits for all actions before returning. */
   step(context: StepContext): Promise<ModelResponse>;
