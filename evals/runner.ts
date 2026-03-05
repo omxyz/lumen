@@ -1,4 +1,4 @@
-import type { RunResult } from "../../src/types.js";
+import type { RunResult } from "../src/types.js";
 
 export interface EvalTask {
   name: string;

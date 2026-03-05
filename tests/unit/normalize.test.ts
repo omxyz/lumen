@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { denormalize, normalize, clampNormalized, denormalizePoint } from "../../src/model/adapter.js";
+import { denormalize, normalize, denormalizePoint } from "../../src/model/adapter.js";
 
 describe("denormalize", () => {
   it("converts 500 (50%) to half of dimension", () => {
@@ -31,22 +31,6 @@ describe("normalize", () => {
 
   it("converts full dimension to 1000", () => {
     expect(normalize(720, 720)).toBe(1000);
-  });
-});
-
-describe("clampNormalized", () => {
-  it("clamps below 0 to 0", () => {
-    expect(clampNormalized(-50)).toBe(0);
-  });
-
-  it("clamps above 1000 to 1000", () => {
-    expect(clampNormalized(1500)).toBe(1000);
-  });
-
-  it("passes through values in range", () => {
-    expect(clampNormalized(500)).toBe(500);
-    expect(clampNormalized(0)).toBe(0);
-    expect(clampNormalized(1000)).toBe(1000);
   });
 });
 

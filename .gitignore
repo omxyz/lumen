@@ -2,3 +2,17 @@ node_modules/
 dist/
 .env
 *.local
+
+# Build artifacts outside dist/
+tests/**/*.js
+tests/**/*.js.map
+tests/**/*.d.ts
+tests/**/*.d.ts.map
+evals/**/*.js
+evals/**/*.js.map
+evals/**/*.d.ts
+evals/**/*.d.ts.map
+examples/**/*.js
+examples/**/*.js.map
+examples/**/*.d.ts
+examples/**/*.d.ts.map

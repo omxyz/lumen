@@ -86,10 +86,6 @@ export function normalize(pixel: number, dimension: number): number {
   return Math.round((pixel / dimension) * 1000);
 }
 
-export function clampNormalized(coord: number): number {
-  return Math.max(0, Math.min(1000, coord));
-}
-
 export function denormalizePoint(
   x: number,
   y: number,

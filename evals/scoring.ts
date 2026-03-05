@@ -1,4 +1,4 @@
-import type { RunResult } from "../../src/types.js";
+import type { RunResult } from "../src/types.js";
 
 /** 1.0 if result text contains all keywords, 0.0 otherwise */
 export function exactMatch(keywords: string[]): (result: RunResult) => number {
