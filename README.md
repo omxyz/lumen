@@ -241,10 +241,39 @@ LUMEN_LOG_LOOP=1 npm start             # perception loop internals
 
 Surfaces: `LUMEN_LOG_CDP`, `LUMEN_LOG_ACTIONS`, `LUMEN_LOG_BROWSER`, `LUMEN_LOG_HISTORY`, `LUMEN_LOG_ADAPTER`, `LUMEN_LOG_LOOP`.
 
+## Eval
+
+Abbreviated [WebVoyager](https://github.com/MinorJerry/WebVoyager) benchmark (25 tasks, `claude-sonnet-4-6`):
+
+| Metric | Score |
+|---|---|
+| **Pass rate** | **96.0% (24/25)** |
+| Avg steps per task | 12.3 |
+| Avg tokens per task | 84K |
+| Avg time per task | 86.9s |
+| Token reduction (vs baseline) | 32.1% |
+
+Per-task breakdown:
+
+| Task | Steps | Token reduction |
+|---|---|---|
+| wikipedia_shannon | 4 | 5.6% |
+| github_react_version | 3 | ~0% |
+| hacker_news_top | 1 | 0% |
+| allrecipes_wellington | 14 | 39.7% |
+
+Token savings scale with task length — long tasks (20+ steps) routinely exceed 40% reduction.
+
+Run evals yourself:
+
+```bash
+ANTHROPIC_API_KEY=sk-... npx tsx evals/webvoyager/run.ts
+```
+
 ## Testing
 
 ```bash
-npm test              # 286 tests, ~3.5s
+npm test              # 140 tests, ~3.5s
 npm run test:watch
 npm run typecheck
 ```
