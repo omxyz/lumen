@@ -14,6 +14,7 @@ export class HistoryManager {
   private semantic: SemanticStep[] = [];
   private totalInputTokens = 0;
   private lastResponse: ModelResponse | null = null;
+  private foldedSummaries: string[] = [];
 
   /** Tracks (action, toolCallId) pairs awaiting their tool_result. */
   private pendingToolCalls: Array<{ action: Action; toolCallId: string }> = [];
@@ -95,6 +96,21 @@ export class HistoryManager {
     this.wire.push({ role: "screenshot", base64, stepIndex, compressed: false });
   }
 
+  // ─── Fold (agent-controlled context compression) ───────────────────────────
+
+  /** Store a completed sub-goal summary. Persists across compaction. */
+  addFold(summary: string): void {
+    this.foldedSummaries.push(summary);
+    // Aggressively compress old screenshots when folding
+    this.compressScreenshots(1);
+  }
+
+  /** Get all folded summaries for injection into system prompt. */
+  getFoldedContext(): string | undefined {
+    if (this.foldedSummaries.length === 0) return undefined;
+    return "COMPLETED SUB-GOALS:\n" + this.foldedSummaries.map((s, i) => `${i + 1}. ${s}`).join("\n");
+  }
+
   // ─── Compression ────────────────────────────────────────────────────────────
 
   /** Tier 1: Replace screenshot image data older than keepRecent steps with a text placeholder. */
@@ -143,6 +159,7 @@ export class HistoryManager {
       wireHistory: this.wire,
       semanticSteps: this.semantic,
       agentState,
+      foldedSummaries: this.foldedSummaries.length > 0 ? this.foldedSummaries : undefined,
     };
   }
 
@@ -153,6 +170,9 @@ export class HistoryManager {
     const history = new HistoryManager(contextWindowTokens);
     history.wire = data.wireHistory;
     history.semantic = data.semanticSteps;
+    if ((data as { foldedSummaries?: string[] }).foldedSummaries) {
+      history.foldedSummaries = (data as { foldedSummaries: string[] }).foldedSummaries;
+    }
     return { history, agentState: data.agentState };
   }
 

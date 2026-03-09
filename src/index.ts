@@ -79,3 +79,15 @@ export type { Verifier, VerifyResult } from "./loop/verifier.js";
 export { ConsoleMonitor, NoopMonitor } from "./loop/monitor.js";
 export type { LoopMonitor } from "./loop/monitor.js";
 export { StreamingMonitor } from "./loop/streaming-monitor.js";
+
+// v2 features
+export { ConfidenceGate } from "./loop/confidence-gate.js";
+export type { ConfidenceGateOptions } from "./loop/confidence-gate.js";
+export { ActionVerifier } from "./loop/action-verifier.js";
+export type { ActionVerification } from "./loop/action-verifier.js";
+export { CheckpointManager } from "./loop/checkpoint.js";
+export type { BrowserCheckpoint } from "./loop/checkpoint.js";
+export { SiteKB } from "./memory/site-kb.js";
+export type { SiteRule } from "./memory/site-kb.js";
+export { WorkflowMemory } from "./memory/workflow.js";
+export type { Workflow } from "./memory/workflow.js";

@@ -25,6 +25,7 @@ function buildSystemPrompt(context: StepContext): string {
     "- BE DECISIVE: Once you have sufficient information, call task_complete immediately. Do not keep browsing to double-check.\n" +
     "- THINK FIRST: Before acting, briefly consider: What key information is visible? What have I accomplished? What is my next step?\n" +
     "- CHECKPOINT PROGRESS: Call update_state every 3-5 steps to save your findings so far. Include ALL data collected — this persists even if history is compacted.\n" +
+    "- Use fold() to compress completed sub-goals into permanent summaries that persist even if history is compacted.\n" +
     "- VERIFY ACTIONS: After any form interaction (date picker, dropdown, filter, checkbox), CHECK the next screenshot to confirm your selection was applied correctly. If the field shows a wrong value or the filter shows wrong results, try again with a different approach.\n" +
     "- DATE PICKERS: 1) First try typing the date directly into the input field (common formats: MM/DD/YYYY, YYYY-MM-DD). 2) If using a calendar widget, navigate to the correct MONTH first using arrow buttons, then click the specific date. 3) After selecting, READ the date field value in the next screenshot to verify it matches your intent.\n" +
     "- FORMS: Fill one field at a time. For dropdowns, click to open then click the exact option text. If an element doesn't respond to clicks, try Tab key to move between fields, or type directly into focused inputs.\n" +
@@ -206,6 +207,13 @@ function buildMessages(context: StepContext): Anthropic.MessageParam[] {
               name: "update_state",
               input: { data: action.data },
             } as unknown as Anthropic.ContentBlock);
+          } else if (action.type === "fold") {
+            content.push({
+              type: "tool_use" as const,
+              id,
+              name: "fold",
+              input: { summary: action.summary },
+            } as unknown as Anthropic.ContentBlock);
           } else {
             content.push({
               type: "tool_use" as const,
@@ -226,7 +234,7 @@ function buildMessages(context: StepContext): Anthropic.MessageParam[] {
       } else {
         const actionType = msg.action as string | undefined;
         // Computer tool actions are everything except goto/writeState/terminate
-        const isComputer = actionType !== "goto" && actionType !== "writeState" && actionType !== "terminate";
+        const isComputer = actionType !== "goto" && actionType !== "writeState" && actionType !== "terminate" && actionType !== "fold";
         toolResultBatch.push({
           toolUseId,
           ok: msg.ok as boolean,
@@ -340,9 +348,25 @@ export class AnthropicAdapter implements ModelAdapter {
             required: ["result"],
           },
         } as unknown as Anthropic.Beta.BetaTool,
+        {
+          name: "fold",
+          description: "Compress a completed sub-goal into a permanent summary. Call when you finish a sub-task (e.g. 'Found cheapest flight: $342 Delta'). The summary persists even if history is compacted. Use this to keep your context clean.",
+          input_schema: {
+            type: "object" as const,
+            properties: {
+              summary: { type: "string", description: "Concise summary of what was accomplished" },
+            },
+            required: ["summary"],
+          },
+        } as unknown as Anthropic.Beta.BetaTool,
       ],
       betas,
     };
+
+    // Apply temperature if set (used by ConfidenceGate for multi-sampling)
+    if (context.temperature !== undefined) {
+      (requestParams as unknown as Record<string, unknown>).temperature = context.temperature;
+    }
 
     if (this.thinkingBudget > 0) {
       (requestParams as unknown as Record<string, unknown>).thinking = {
@@ -377,6 +401,10 @@ export class AnthropicAdapter implements ModelAdapter {
         } else if (toolBlock.name === "update_state") {
           const data = (toolBlock.input.data as TaskState) ?? {};
           actions.push({ type: "writeState", data });
+          toolCallIds.push(toolBlock.id);
+        } else if (toolBlock.name === "fold") {
+          const summary = (toolBlock.input.summary as string) ?? "";
+          actions.push({ type: "fold", summary });
           toolCallIds.push(toolBlock.id);
         } else {
           actions.push(decoder.fromAnthropic(toolBlock, {
@@ -473,9 +501,21 @@ export class AnthropicAdapter implements ModelAdapter {
             required: ["result"],
           },
         },
+        {
+          name: "fold",
+          description: "Compress a completed sub-goal into a permanent summary. Call when you finish a sub-task. The summary persists even if history is compacted.",
+          input_schema: {
+            type: "object" as const,
+            properties: {
+              summary: { type: "string", description: "Concise summary of what was accomplished" },
+            },
+            required: ["summary"],
+          },
+        },
       ],
       betas,
       ...(this.thinkingBudget > 0 ? { thinking: { type: "enabled" as const, budget_tokens: this.thinkingBudget } } : {}),
+      ...(context.temperature !== undefined ? { temperature: context.temperature } : {}),
     };
 
     // Accumulate partial JSON inputs and metadata for each content block
@@ -542,6 +582,9 @@ export class AnthropicAdapter implements ModelAdapter {
             } else if (blockName === "update_state") {
               const data = (input.data as TaskState) ?? {};
               action = { type: "writeState", data };
+            } else if (blockName === "fold") {
+              const summary = (input.summary as string) ?? "";
+              action = { type: "fold", summary };
             } else {
               action = decoder.fromAnthropic(
                 { name: "computer", input },

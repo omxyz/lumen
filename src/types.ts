@@ -52,7 +52,8 @@ export type Action =
   | { type: "screenshot" }
   | { type: "terminate"; status: "success" | "failure"; result: string }
   | { type: "hover"; x: number; y: number }
-  | { type: "delegate"; instruction: string; maxSteps?: number };
+  | { type: "delegate"; instruction: string; maxSteps?: number }
+  | { type: "fold"; summary: string };
 
 // ─── Action Outcome ───────────────────────────────────────────────────────────
 
@@ -60,6 +61,8 @@ export type Action =
 export interface ActionOutcome {
   ok: boolean;
   error?: string;
+  /** Description of what element received focus after a click (post-click verification). */
+  clickTarget?: string;
 }
 
 /** Returned by ActionRouter after executing an Action. */
@@ -202,6 +205,16 @@ export interface AgentOptions {
   autoAlignViewport?: boolean;
   systemPrompt?: string;
   maxSteps?: number;
+  /** Enable CATTS-inspired confidence gate: multi-sample on hard steps. */
+  confidenceGate?: boolean;
+  /** Enable post-action verification heuristics. */
+  actionVerifier?: boolean;
+  /** Enable browser state checkpointing for backtracking. Interval in steps (default: 5). */
+  checkpointInterval?: number;
+  /** Path to site knowledge base JSON file, or inline rules array. */
+  siteKB?: string | Array<{ domain: string; rules: string[] }>;
+  /** Path to workflow memory JSON file. */
+  workflowMemory?: string;
   /** Anthropic extended thinking token budget. Default: 0 (disabled). */
   thinkingBudget?: number;
   /** Trigger LLM summarization compaction at this utilization. Default: 0.8 */

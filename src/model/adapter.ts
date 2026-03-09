@@ -35,6 +35,8 @@ export interface StepContext {
   maxSteps: number;
   url: string;
   systemPrompt?: string;
+  /** Optional temperature override (used by ConfidenceGate for multi-sampling). */
+  temperature?: number;
 }
 
 export interface ModelResponse {

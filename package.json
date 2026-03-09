@@ -27,7 +27,8 @@
     "benchmark": "tsx --env-file .env evals/benchmark/loop.ts",
     "benchmark:lumen": "tsx --env-file .env evals/benchmark/loop.ts --lumen-only",
     "benchmark:stagehand": "FRAMEWORKS=stagehand tsx --env-file .env evals/benchmark/loop.ts",
-    "benchmark:browser-use": "FRAMEWORKS=browser-use tsx --env-file .env evals/benchmark/loop.ts"
+    "benchmark:browser-use": "FRAMEWORKS=browser-use tsx --env-file .env evals/benchmark/loop.ts",
+    "eval:compare": "tsx --env-file .env evals/webvoyager/run-comparison.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

@@ -11,12 +11,17 @@ import type { SessionPolicy } from "./policy.js";
 import { LumenLogger } from "../logger.js";
 import { RepeatDetector, nudgeMessage } from "./repeat-detector.js";
 import { ActionCache, screenshotHash } from "./action-cache.js";
+import type { ConfidenceGate } from "./confidence-gate.js";
+import type { ActionVerifier } from "./action-verifier.js";
+import type { CheckpointManager } from "./checkpoint.js";
+import type { SiteKB } from "../memory/site-kb.js";
+import type { WorkflowMemory } from "../memory/workflow.js";
 
 const CUA_TOOLS: Action["type"][] = [
   "click", "doubleClick", "drag", "scroll",
   "type", "keyPress", "wait", "goto",
   "writeState", "screenshot", "terminate",
-  "hover", "delegate",
+  "hover", "delegate", "fold",
 ];
 
 export interface PerceptionLoopOptions {
@@ -40,6 +45,16 @@ export interface PerceptionLoopOptions {
   log?: LumenLogger;
   /** Enable action caching. Pass a directory path to enable, or omit to disable. */
   cacheDir?: string;
+  /** CATTS-inspired confidence gate: multi-sample on hard steps. */
+  confidenceGate?: ConfidenceGate;
+  /** BacktrackAgent-inspired post-action verifier. */
+  actionVerifier?: ActionVerifier;
+  /** Browser state checkpointing for backtracking on stuck detection. */
+  checkpointManager?: CheckpointManager;
+  /** Site-specific knowledge base for domain-matched prompt tips. */
+  siteKB?: SiteKB;
+  /** AWM-inspired workflow memory for injecting past success patterns. */
+  workflowMemory?: WorkflowMemory;
 }
 
 export class PerceptionLoop {
@@ -58,6 +73,11 @@ export class PerceptionLoop {
   private readonly log: LumenLogger;
   private readonly repeatDetector = new RepeatDetector();
   private readonly actionCache: ActionCache | null;
+  private readonly confidenceGate?: ConfidenceGate;
+  private readonly actionVerifier?: ActionVerifier;
+  private readonly checkpointManager?: CheckpointManager;
+  private readonly siteKB?: SiteKB;
+  private readonly workflowMemory?: WorkflowMemory;
 
   constructor(opts: PerceptionLoopOptions) {
     this.tab = opts.tab;
@@ -74,6 +94,11 @@ export class PerceptionLoop {
     this.log = opts.log ?? LumenLogger.NOOP;
     this.router = new ActionRouter(opts.timing, this.log);
     this.actionCache = opts.cacheDir ? new ActionCache(opts.cacheDir) : null;
+    this.confidenceGate = opts.confidenceGate;
+    this.actionVerifier = opts.actionVerifier;
+    this.checkpointManager = opts.checkpointManager;
+    this.siteKB = opts.siteKB;
+    this.workflowMemory = opts.workflowMemory;
   }
 
   async run(options: LoopOptions): Promise<LoopResult> {
@@ -81,6 +106,8 @@ export class PerceptionLoop {
     let pendingNudge: string | undefined;
     let nudgeSource: "action" | "url" | undefined; // Track nudge origin for clearing logic
     let lastNormalizedUrl = ""; // Track URL for clearing URL nudges
+    let lastOutcomeFailed = false; // Track for confidence gate
+    let hasBacktracked = false; // Prevent repeated backtracking
 
     for (let step = 0; step < options.maxSteps; step++) {
       // ── Step start ──────────────────────────────────────────────────────────
@@ -123,9 +150,10 @@ export class PerceptionLoop {
       //     Also clear URL nudges when the page actually changes (SPA fix).
       const currentNormalized = normalizeUrlForStall(this.tab.url());
       if (nudgeSource === "url" && currentNormalized !== lastNormalizedUrl) {
-        // Agent navigated away — clear the URL nudge
+        // Agent navigated away — clear the URL nudge and reset backtrack flag
         pendingNudge = undefined;
         nudgeSource = undefined;
+        hasBacktracked = false;
       }
       lastNormalizedUrl = currentNormalized;
 
@@ -133,8 +161,29 @@ export class PerceptionLoop {
       const urlStall = this.repeatDetector.recordUrl(this.tab.url());
       if (urlStall !== null) {
         this.log.loop(`step ${step + 1}: URL stall detected at level ${urlStall} (url=${this.tab.url()})`);
-        pendingNudge = nudgeMessage(urlStall, "url");
-        nudgeSource = "url";
+
+        // Backtrack on level 8+ if checkpoint manager is available and we haven't already backtracked
+        if (urlStall >= 8 && this.checkpointManager && !hasBacktracked) {
+          const checkpoint = await this.checkpointManager.restore(this.tab);
+          if (checkpoint) {
+            hasBacktracked = true;
+            if (checkpoint.agentState) this.state.write(checkpoint.agentState);
+            pendingNudge = `BACKTRACKED to step ${checkpoint.step}. Your previous approach was stuck. Try a COMPLETELY different strategy — different elements, different navigation path, or URL parameters.`;
+            nudgeSource = "url";
+            this.log.loop(`step ${step + 1}: backtracked to checkpoint at step ${checkpoint.step}`);
+          } else {
+            pendingNudge = nudgeMessage(urlStall, "url");
+            nudgeSource = "url";
+          }
+        } else {
+          pendingNudge = nudgeMessage(urlStall, "url");
+          nudgeSource = "url";
+        }
+      }
+
+      // Checkpoint: save browser state periodically
+      if (this.checkpointManager && step % this.checkpointManager.interval === 0) {
+        await this.checkpointManager.save(step, this.tab.url(), this.state.current(), this.tab);
       }
 
       // 2. Screenshot (with cursor overlay at last click position if enabled)
@@ -146,12 +195,32 @@ export class PerceptionLoop {
       this.history.appendScreenshot(screenshot.data.toString("base64"), step);
 
       // 3. Build step context — state re-injected every step regardless of compaction
-      //    If repeat detector flagged a nudge, prepend it to the system prompt for this step.
-      //    Nudges are STICKY — they persist until the model takes a productive action
-      //    (click, goto, writeState, terminate) rather than clearing every step.
-      const stepSystemPrompt = pendingNudge
-        ? `${pendingNudge}\n\n${options.systemPrompt ?? ""}`
-        : options.systemPrompt;
+      //    Layer additional context: site KB, workflow hints, fold summaries, nudges.
+      const promptParts: string[] = [];
+
+      // Inject folded sub-goal summaries (persist across compaction)
+      const foldedContext = this.history.getFoldedContext();
+      if (foldedContext) promptParts.push(foldedContext);
+
+      // Inject site-specific tips if URL matches
+      if (this.siteKB) {
+        const siteTips = this.siteKB.formatForPrompt(this.tab.url());
+        if (siteTips) promptParts.push(siteTips);
+      }
+
+      // Inject workflow hint on first step only
+      if (step === 0 && this.workflowMemory && options.systemPrompt) {
+        const workflow = this.workflowMemory.match(options.systemPrompt, this.tab.url());
+        if (workflow) promptParts.push(this.workflowMemory.toPromptHint(workflow));
+      }
+
+      // Nudges are STICKY — persist until productive action clears them
+      if (pendingNudge) promptParts.push(pendingNudge);
+
+      // Base system prompt last
+      if (options.systemPrompt) promptParts.push(options.systemPrompt);
+
+      const stepSystemPrompt = promptParts.length > 0 ? promptParts.join("\n\n") : undefined;
 
       const context: StepContext = {
         screenshot,
@@ -184,7 +253,22 @@ export class PerceptionLoop {
       );
       const modelT0 = Date.now();
 
-      for await (const action of this.adapter.stream(context)) {
+      // Confidence gate: on hard steps, use multi-sampling instead of streaming
+      const useConfidenceGate = this.confidenceGate?.isHardStep(pendingNudge, lastOutcomeFailed);
+      const actionSource: AsyncIterable<Action> = useConfidenceGate && this.confidenceGate
+        ? (async function* (gate, ctx) {
+            const response = await gate.decide(ctx, true);
+            // Cache the response for PerceptionLoop
+            const adapterAny = gate as unknown as { _lastGateResponse?: ModelResponse };
+            adapterAny._lastGateResponse = response;
+            for (const a of response.actions) yield a;
+          })(this.confidenceGate, context)
+        : this.adapter.stream(context);
+
+      // Save URL before actions for verifier comparison
+      const preActionUrl = this.tab.url();
+
+      for await (const action of actionSource) {
         if (terminated) {
           // Drain remaining stream actions without executing (e.g. if model emits multiple actions after terminate)
           continue;
@@ -218,6 +302,31 @@ export class PerceptionLoop {
 
         // 5c. Execute
         const outcome = await this.router.execute(action, this.tab, this.state);
+
+        // 5c-fold. Handle fold action — store summary in history
+        if (action.type === "fold") {
+          this.history.addFold(action.summary);
+          this.log.loop(`step ${step + 1}: fold — "${action.summary.slice(0, 60)}"`);
+          bufferedOutcomes.push({ action, wireOutcome: { ok: true } });
+          stepActions.push({ action, outcome: { ok: true } });
+          continue;
+        }
+
+        // 5c-verify. Post-action verification (BacktrackAgent-inspired)
+        if (this.actionVerifier && !outcome.terminated && !outcome.isDelegateRequest) {
+          const verification = await this.actionVerifier.verify(
+            action, { ok: outcome.ok, error: outcome.error, clickTarget: (outcome as { clickTarget?: string }).clickTarget }, this.tab, preActionUrl,
+          );
+          if (!verification.success && verification.hint) {
+            if (pendingNudge) {
+              pendingNudge = `${pendingNudge}\n\n${verification.hint}`;
+            } else {
+              pendingNudge = verification.hint;
+              nudgeSource = "action";
+            }
+            lastOutcomeFailed = true;
+          }
+        }
 
         // 5d. Termination check
         if (outcome.terminated) {
@@ -276,6 +385,7 @@ export class PerceptionLoop {
         this.monitor.actionExecuted(step, action, outcome);
         stepActions.push({ action, outcome: { ok: outcome.ok, error: outcome.error } });
         bufferedOutcomes.push({ action, wireOutcome: { ok: outcome.ok, error: outcome.error } });
+        lastOutcomeFailed = !outcome.ok;
 
         // 5e-clear. Clear nudge based on its source:
         //   - Action nudges: clear on any productive action (click, goto, writeState, etc.)
@@ -310,6 +420,8 @@ export class PerceptionLoop {
       // 5h. Form state extraction — after form-related actions, extract input values via CDP
       //      and inject as a nudge for the next step. This gives the model explicit text feedback
       //      about what values are actually set in form fields (dates, filters, text inputs).
+      //      Always inject — even when a repeat/stall nudge is pending (especially then, since
+      //      the agent needs to know WHY it's stuck: "your form fields are still empty").
       const hadFormAction = bufferedOutcomes.some(({ action: a }) =>
         a.type === "click" || a.type === "doubleClick" || a.type === "type",
       );
@@ -318,21 +430,32 @@ export class PerceptionLoop {
           const formState = await this.tab.evaluate<string>(`
             (() => {
               const fields = [];
+              const empties = [];
               const inputs = document.querySelectorAll('input:not([type="hidden"]), select, textarea');
               for (const el of inputs) {
                 if (!el.offsetParent && el.tagName !== 'INPUT') continue;
                 const label = el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('name') || el.id || '';
                 if (!label) continue;
                 const val = el.tagName === 'SELECT' ? el.options[el.selectedIndex]?.text : el.value;
-                if (val) fields.push(label.slice(0, 30) + ': ' + val.slice(0, 50));
+                if (val) {
+                  fields.push(label.slice(0, 30) + ': ' + val.slice(0, 50));
+                } else {
+                  empties.push(label.slice(0, 30));
+                }
               }
-              return fields.length > 0 ? fields.slice(0, 8).join(' | ') : '';
+              let result = '';
+              if (fields.length > 0) result += 'FILLED: ' + fields.slice(0, 8).join(' | ');
+              if (empties.length > 0) result += (result ? '\\n' : '') + 'EMPTY: ' + empties.slice(0, 6).join(', ');
+              return result;
             })()
           `);
           if (formState && formState.length > 5) {
-            // Only inject if we don't already have a more important nudge (repeat/stall)
-            if (!pendingNudge) {
-              pendingNudge = `FORM STATE: ${formState}\nVerify these values match your intent. If a date or filter is wrong, correct it before proceeding.`;
+            const formNudge = `FORM STATE: ${formState}\nVerify these values match your intent. If a field is EMPTY or wrong, your previous action may not have worked — try clicking the field first, then typing.`;
+            if (pendingNudge) {
+              // Append form state to existing nudge — agent needs both signals
+              pendingNudge = `${pendingNudge}\n\n${formNudge}`;
+            } else {
+              pendingNudge = formNudge;
               nudgeSource = "action"; // Clear on next productive action
             }
           }
@@ -408,6 +531,18 @@ export class PerceptionLoop {
       // Return termination result with up-to-date semantic history
       if (terminationResult) {
         terminationResult.history = this.history.semanticHistory();
+
+        // Extract workflow from successful runs for future reuse
+        if (terminationResult.status === "success" && this.workflowMemory && options.systemPrompt) {
+          try {
+            const { WorkflowMemory: WM } = await import("../memory/workflow.js");
+            const workflow = WM.extract(options.systemPrompt, terminationResult.history);
+            if (workflow) this.workflowMemory.add(workflow);
+          } catch {
+            // Workflow extraction is non-critical
+          }
+        }
+
         this.monitor.terminated(terminationResult);
         return terminationResult;
       }
@@ -457,6 +592,7 @@ function isProductiveAction(action: Action): boolean {
     case "terminate":
     case "type":
     case "delegate":
+    case "fold":
       return true;
     default:
       return false;

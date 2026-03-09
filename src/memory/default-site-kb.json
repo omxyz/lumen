@@ -1,0 +1,109 @@
+[
+  {
+    "domain": "google.com/travel",
+    "rules": [
+      "CRITICAL: Google Flights date picker is unreliable. After 1 failed attempt, construct the URL directly with date params: /travel/flights?hl=en&curr=USD&tfs=...",
+      "Results load asynchronously — wait 2s after search before reading results",
+      "For round-trip, ensure BOTH departure and return dates are set before reading prices",
+      "Click the 'Cheapest' tab to see lowest fares, then verify the displayed price matches"
+    ]
+  },
+  {
+    "domain": "allrecipes.com",
+    "rules": [
+      "Sort dropdown is top-right labeled 'Sort By'",
+      "Ratings and review counts are visible in list view — don't click into individual recipes",
+      "For recipe collections, scroll through the numbered list — items are displayed in order"
+    ]
+  },
+  {
+    "domain": "*.booking.com",
+    "rules": [
+      "Dismiss cookie banner before interacting with the page",
+      "CRITICAL: For date selection, if the calendar is unreliable, construct URL with check-in/check-out params: ?checkin=YYYY-MM-DD&checkout=YYYY-MM-DD",
+      "URL tracking params change frequently — ignore query string differences",
+      "After applying filters, wait for results to reload and verify the filter chips are active",
+      "For rating filters: use the URL param &nflt=review_score%3D90 for 9+ rating",
+      "If no hotels match ALL criteria, report what was found with closest matches"
+    ]
+  },
+  {
+    "domain": "github.com",
+    "rules": [
+      "Use the search bar at top for finding repos/issues/code",
+      "Star counts and language info visible on repo cards — read directly from search results",
+      "For repository file lists, the most recent commit info is visible next to each file"
+    ]
+  },
+  {
+    "domain": "amazon.com",
+    "rules": [
+      "Dismiss location/delivery popups before proceeding",
+      "Prices and ratings visible in search results — don't click into each product",
+      "Use the left sidebar filters for category, price range, ratings"
+    ]
+  },
+  {
+    "domain": "maps.google.com",
+    "rules": [
+      "Search bar is at top-left",
+      "After searching, results appear in left panel — read directly",
+      "For directions, click 'Directions' button then enter start/end points",
+      "Distance and time are shown in the directions panel — read directly"
+    ]
+  },
+  {
+    "domain": "wolframalpha.com",
+    "rules": [
+      "Enter query in the main search bar and press Enter",
+      "Results appear below — may need to scroll to see full output",
+      "IMPORTANT: For multi-item queries (e.g. comparing two materials), query EACH item separately. Don't assume one query covers both.",
+      "After getting first result, use update_state to save it, then query the second item",
+      "For step-by-step solutions, look for 'Step-by-step solution' link"
+    ]
+  },
+  {
+    "domain": "espn.com",
+    "rules": [
+      "Scores and standings visible on main pages — read directly",
+      "Use top navigation for sport-specific sections",
+      "For stats pages: if 'No Data Available' appears, try a different filter or navigate to a different stats URL",
+      "NBA stats URL pattern: /nba/stats/player/_/stat/rebounds/seasontype/2",
+      "For Western/Eastern conference filters, look for dropdown selectors on the stats page"
+    ]
+  },
+  {
+    "domain": "bbc.com",
+    "rules": [
+      "If a direct URL returns 404, use the BBC search bar instead to find the content",
+      "BBC restructures URLs frequently — don't rely on direct section URLs",
+      "Use the search function at top of page to find specific topics",
+      "For Sport sections, navigate via the Sport tab in the main navigation"
+    ]
+  },
+  {
+    "domain": "coursera.org",
+    "rules": [
+      "IMPORTANT: Apply ALL requested filters one at a time. After each filter, verify it appears as an active chip/tag before proceeding",
+      "Filter sidebar is on the left — click to expand each filter category",
+      "After applying filters, the result count updates at the top of the results list",
+      "Some filters may require scrolling within the filter panel to find them"
+    ]
+  },
+  {
+    "domain": "arxiv.org",
+    "rules": [
+      "Use Advanced Search for date-filtered queries: arxiv.org/search/advanced",
+      "For specific date ranges, use the date_range field in advanced search",
+      "Article counts are shown at the top of search results",
+      "For section-specific searches, use the subject field in advanced search (e.g. eess for Electrical Engineering)"
+    ]
+  },
+  {
+    "domain": "dictionary.cambridge.org",
+    "rules": [
+      "Definitions appear directly on the page — read them without clicking further",
+      "Multiple meanings are listed — scan all of them before answering"
+    ]
+  }
+]

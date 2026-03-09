@@ -249,6 +249,41 @@ export class Agent {
     // Determine initial history from pending (Agent.resume) or AgentOptions.initialHistory
     const initialHistory = this._pendingHistory ?? this.options.initialHistory;
 
+    // Initialize v2 features
+    let confidenceGate: import("./loop/confidence-gate.js").ConfidenceGate | undefined;
+    if (this.options.confidenceGate) {
+      const { ConfidenceGate } = await import("./loop/confidence-gate.js");
+      confidenceGate = new ConfidenceGate({ adapter });
+    }
+
+    let actionVerifier: import("./loop/action-verifier.js").ActionVerifier | undefined;
+    if (this.options.actionVerifier) {
+      const { ActionVerifier } = await import("./loop/action-verifier.js");
+      actionVerifier = new ActionVerifier();
+    }
+
+    let checkpointManager: import("./loop/checkpoint.js").CheckpointManager | undefined;
+    if (this.options.checkpointInterval !== undefined) {
+      const { CheckpointManager } = await import("./loop/checkpoint.js");
+      checkpointManager = new CheckpointManager({ interval: this.options.checkpointInterval });
+    }
+
+    let siteKB: import("./memory/site-kb.js").SiteKB | undefined;
+    if (this.options.siteKB) {
+      const { SiteKB } = await import("./memory/site-kb.js");
+      if (typeof this.options.siteKB === "string") {
+        siteKB = SiteKB.fromFile(this.options.siteKB);
+      } else {
+        siteKB = new SiteKB(this.options.siteKB);
+      }
+    }
+
+    let workflowMemory: import("./memory/workflow.js").WorkflowMemory | undefined;
+    if (this.options.workflowMemory) {
+      const { WorkflowMemory } = await import("./memory/workflow.js");
+      workflowMemory = WorkflowMemory.fromFile(this.options.workflowMemory);
+    }
+
     this._session = new Session({
       tab,
       adapter,
@@ -266,6 +301,11 @@ export class Agent {
       initialHistory,
       initialState: this.options.initialState,
       log,
+      confidenceGate,
+      actionVerifier,
+      checkpointManager,
+      siteKB,
+      workflowMemory,
     });
     this._pendingHistory = null;
 

@@ -98,13 +98,23 @@ function resolveModelAndKey(): { model: string; apiKey: string | undefined } {
  * needed to make them at least 2 weeks in the future, preserving month/day and
  * relative date gaps within a single instruction.
  */
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function adaptDatesInInstruction(instruction: string): string {
   const now = new Date();
   const twoWeeksFromNow = new Date(now.getTime() + 14 * 86400000);
 
-  // Simple approach: find all year tokens (2023, 2024) that appear near month names
-  // and shift them forward by the minimum years needed to be future.
   const monthNames = "January|February|March|April|May|June|July|August|September|October|November|December";
+  const monthAbbrev = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec";
+  const allMonths = `${monthNames}|${monthAbbrev}`;
+  const expandMonth = (m: string): string => {
+    const full = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+    const abbr = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const idx = abbr.findIndex((a) => a.toLowerCase() === m.replace(".", "").toLowerCase());
+    return idx >= 0 ? full[idx]! : m;
+  };
   const yearPattern = /\b(20(?:23|24|25))\b/g;
 
   // Check if any stale years exist
@@ -112,40 +122,252 @@ function adaptDatesInInstruction(instruction: string): string {
   let match: RegExpExecArray | null;
   while ((match = yearPattern.exec(instruction)) !== null) {
     const year = parseInt(match[1]!);
-    // Verify this year appears within 50 chars of a month name (date context)
     const start = Math.max(0, match.index - 50);
     const end = Math.min(instruction.length, match.index + 50);
     const context = instruction.slice(start, end);
-    if (new RegExp(monthNames, "i").test(context)) {
+    if (new RegExp(allMonths, "i").test(context)) {
       yearsFound.add(year);
     }
   }
 
-  if (yearsFound.size === 0) return instruction;
+  if (yearsFound.size > 0) {
+    const monthsFull = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December",
+    ];
 
-  const minYear = Math.min(...yearsFound);
-  let yearShift = twoWeeksFromNow.getFullYear() - minYear;
-  if (yearShift <= 0) return instruction;
+    // Parse date expressions: "Month Day[, Year]" and "Day Month[ Year]"
+    const fullDateRe = new RegExp(
+      `(${allMonths})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s*(20\\d{2}))?`,
+      "gi",
+    );
+    // Also match "8 March 2024" (day before month)
+    const dayFirstRe = new RegExp(
+      `(\\d{1,2})\\s+(${allMonths})\\.?(?:\\s+(20\\d{2}))?`,
+      "gi",
+    );
+    interface ParsedDate { month: string; day: number; year: number; fullMatch: string; index: number; }
+    const parsedDates: ParsedDate[] = [];
+    const coveredRanges: Array<[number, number]> = [];
+    // First pass: day-first ("8 March 2024") — check these first to avoid
+    // fullDateRe falsely matching "March 20" from "March 2024"
+    while ((match = dayFirstRe.exec(instruction)) !== null) {
+      const day = parseInt(match[1]!);
+      if (day < 1 || day > 31) continue;
+      const month = expandMonth(match[2]!);
+      const year = match[3] ? parseInt(match[3]) : Math.min(...yearsFound);
+      parsedDates.push({ month, day, year, fullMatch: match[0], index: match.index });
+      coveredRanges.push([match.index, match.index + match[0].length]);
+    }
+    // Second pass: month-first ("February 10, 2024") — skip if overlaps day-first
+    while ((match = fullDateRe.exec(instruction)) !== null) {
+      const mi = match.index;
+      const me = mi + match[0].length;
+      if (coveredRanges.some(([s, e]) => mi >= s && mi < e)) continue;
+      const month = expandMonth(match[1]!);
+      const day = parseInt(match[2]!);
+      if (day > 31) continue; // Reject "March 20" from "March 2024" (day=20 is OK but let's be safe)
+      let year = match[3] ? parseInt(match[3]) : 0;
+      if (!year) {
+        const after = instruction.slice(me, me + 20);
+        const yearMatch = after.match(/^,?\s*(20\d{2})/);
+        if (yearMatch) year = parseInt(yearMatch[1]!);
+      }
+      if (!year) year = Math.min(...yearsFound);
+      parsedDates.push({ month, day, year, fullMatch: match[0], index: match.index });
+      coveredRanges.push([mi, me]);
+    }
 
-  // Check if shifting by yearShift makes all months future enough.
-  // If the earliest month in the instruction is before the current month,
-  // we may need +1 year.
-  const monthPattern = new RegExp(`(${monthNames})\\s+(\\d{1,2})`, "gi");
-  let earliestParsed: Date | null = null;
-  while ((match = monthPattern.exec(instruction)) !== null) {
-    const d = new Date(`${match[1]} ${match[2]}, ${minYear + yearShift}`);
-    if (!earliestParsed || d < earliestParsed) earliestParsed = d;
+    if (parsedDates.length === 0) {
+      // No parseable dates, just shift years
+      const minYear = Math.min(...yearsFound);
+      const yearShift = twoWeeksFromNow.getFullYear() - minYear;
+      if (yearShift <= 0) return instruction;
+      let result = instruction.replace(/\b(20(?:23|24|25))\b/g, (yearStr) => {
+        const year = parseInt(yearStr);
+        return yearsFound.has(year) ? String(year + yearShift) : yearStr;
+      });
+      return result.replace(/today\s*\([^)]*\)/gi, "today");
+    }
+
+    // Find earliest date and compute day-delta to land it ~45 days from now
+    const earliest = parsedDates.reduce((min, d) => {
+      const date = new Date(`${d.month} ${d.day}, ${d.year}`);
+      const minDate = new Date(`${min.month} ${min.day}, ${min.year}`);
+      return date < minDate ? d : min;
+    });
+    const earliestDate = new Date(`${earliest.month} ${earliest.day}, ${earliest.year}`);
+    const targetDate = new Date(now.getTime() + 45 * 86400000); // 45 days from now
+    const dayDelta = Math.round((targetDate.getTime() - earliestDate.getTime()) / 86400000);
+
+    if (dayDelta <= 0) return instruction; // Already in the future
+
+    // Shift all dates by the same dayDelta, preserving relative gaps
+    const maxFuture = new Date(now.getTime() + 300 * 86400000);
+    const shiftedDates = parsedDates.map((d) => {
+      const orig = new Date(`${d.month} ${d.day}, ${d.year}`);
+      const shifted = new Date(orig.getTime() + dayDelta * 86400000);
+      return { ...d, shifted };
+    });
+
+    // Validate all shifted dates are in usable window
+    const allValid = shiftedDates.every(
+      (d) => d.shifted >= twoWeeksFromNow && d.shifted <= maxFuture,
+    );
+    if (!allValid) {
+      // Fallback: just do year shift capped at current year
+      const minYear = Math.min(...yearsFound);
+      const yearShift = now.getFullYear() - minYear;
+      if (yearShift <= 0) return instruction;
+      let result = instruction.replace(/\b(20(?:23|24|25))\b/g, (yearStr) => {
+        const year = parseInt(yearStr);
+        return yearsFound.has(year) ? String(year + yearShift) : yearStr;
+      });
+      return result.replace(/today\s*\([^)]*\)/gi, "today");
+    }
+
+    // Replace dates in reverse order to preserve indices
+    let result = instruction;
+    for (const d of [...shiftedDates].sort((a, b) => b.index - a.index)) {
+      const newMonth = monthsFull[d.shifted.getMonth()]!;
+      const newDay = d.shifted.getDate();
+      const newYear = d.shifted.getFullYear();
+
+      // Match the original date expression at this position (including year if present)
+      const origSlice = result.slice(d.index, d.index + d.fullMatch.length + 10);
+      // Check if year follows the match
+      const hasYear = /^,?\s*20\d{2}/.test(origSlice.slice(d.fullMatch.length));
+      const endPos = hasYear
+        ? d.index + origSlice.match(new RegExp(`^${escapeRegex(d.fullMatch)},?\\s*20\\d{2}`))![0].length
+        : d.index + d.fullMatch.length;
+
+      result = result.slice(0, d.index) + `${newMonth} ${newDay}, ${newYear}` + result.slice(endPos);
+    }
+
+    // Replace any remaining bare year references
+    const minYear = Math.min(...yearsFound);
+    const yearShift = Math.round(dayDelta / 365);
+    result = result.replace(/\b(20(?:23|24|25))\b/g, (yearStr) => {
+      const year = parseInt(yearStr);
+      return yearsFound.has(year) ? String(year + (yearShift || 1)) : yearStr;
+    });
+    return result.replace(/today\s*\([^)]*\)/gi, "today");
   }
-  if (earliestParsed && earliestParsed < twoWeeksFromNow) yearShift++;
 
-  // Replace all stale years with shifted years (single pass, no double-shift)
-  let result = instruction.replace(/\b(20(?:23|24|25))\b/g, (yearStr) => {
-    const year = parseInt(yearStr);
-    return yearsFound.has(year) ? String(year + yearShift) : yearStr;
+  // Fallback: no explicit years, but month+day patterns exist (e.g. "December 28th",
+  // "January 1-4", "December 25-26"). These are implicitly "current year" but may
+  // already be in the past. Use day-delta to shift into 45-300 day window.
+  const monthsFull = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+  const yearlessDatePattern = new RegExp(
+    `(${allMonths})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?`,
+    "gi",
+  );
+  const yearlessDates: Array<{ month: string; day: number; index: number; fullMatch: string }> = [];
+  while ((match = yearlessDatePattern.exec(instruction)) !== null) {
+    const day = parseInt(match[2]!);
+    if (day > 31) continue;
+    yearlessDates.push({
+      month: match[1]!,
+      day,
+      index: match.index,
+      fullMatch: match[0],
+    });
+  }
+  // Also match day-first: "20 December"
+  const yearlessDayFirstRe = new RegExp(
+    `(\\d{1,2})\\s+(${allMonths})\\.?`,
+    "gi",
+  );
+  while ((match = yearlessDayFirstRe.exec(instruction)) !== null) {
+    const day = parseInt(match[1]!);
+    if (day < 1 || day > 31) continue;
+    if (yearlessDates.some((d) => match!.index >= d.index && match!.index < d.index + d.fullMatch.length)) continue;
+    yearlessDates.push({
+      month: match[2]!,
+      day,
+      index: match.index,
+      fullMatch: match[0],
+    });
+  }
+
+  if (yearlessDates.length === 0) return instruction;
+
+  const currentYear = now.getFullYear();
+  let needsShift = false;
+  for (const d of yearlessDates) {
+    const dateThisYear = new Date(`${expandMonth(d.month)} ${d.day}, ${currentYear}`);
+    if (dateThisYear < twoWeeksFromNow) { needsShift = true; break; }
+  }
+  if (!needsShift) return instruction;
+
+  // Shift earliest date to ~45 days from now using day-delta
+  const earliestYearless = yearlessDates.reduce((min, d) => {
+    const date = new Date(`${expandMonth(d.month)} ${d.day}, ${currentYear}`);
+    const minDate = new Date(`${expandMonth(min.month)} ${min.day}, ${currentYear}`);
+    return date < minDate ? d : min;
   });
+  const earliestDate = new Date(`${expandMonth(earliestYearless.month)} ${earliestYearless.day}, ${currentYear}`);
+  const targetDate = new Date(now.getTime() + 45 * 86400000);
+  const dayDelta = Math.round((targetDate.getTime() - earliestDate.getTime()) / 86400000);
+  if (dayDelta <= 0) return instruction;
 
-  // Handle "today (February 17, 2024)" — replace with just "today"
+  const maxFuture = new Date(now.getTime() + 300 * 86400000);
+  let result = instruction;
+  for (const d of [...yearlessDates].sort((a, b) => b.index - a.index)) {
+    const orig = new Date(`${expandMonth(d.month)} ${d.day}, ${currentYear}`);
+    const shifted = new Date(orig.getTime() + dayDelta * 86400000);
+    if (shifted < twoWeeksFromNow || shifted > maxFuture) continue;
+
+    const newMonth = monthsFull[shifted.getMonth()]!;
+    const newDay = shifted.getDate();
+    const newYear = shifted.getFullYear();
+
+    const end = d.index + d.fullMatch.length;
+    const after = result.slice(end, end + 10).trim();
+    if (/^,?\s*20\d{2}/.test(after)) continue;
+    result = result.slice(0, d.index) + `${newMonth} ${newDay}, ${newYear}` + result.slice(end);
+  }
+
   return result.replace(/today\s*\([^)]*\)/gi, "today");
+}
+
+/**
+ * Make time-sensitive instructions idempotent by:
+ * 1. Replacing "yesterday" with an actual recent date
+ * 2. Replacing "today" with the current date
+ * 3. Adding season context for "current season/leaders" references
+ * 4. Replacing "2023-24" season references with current season
+ */
+function adaptTimeSensitiveInstruction(instruction: string): string {
+  const now = new Date();
+  const yesterday = new Date(now.getTime() - 86400000);
+
+  const formatDate = (d: Date) =>
+    d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+
+  let result = instruction;
+
+  // Replace "yesterday" with actual date
+  result = result.replace(
+    /\byesterday\b/gi,
+    formatDate(yesterday),
+  );
+
+  // Replace standalone "today" (not part of "today's date") with actual date
+  result = result.replace(
+    /\btoday(?:'s date)?\b/gi,
+    formatDate(now),
+  );
+
+  // Update season references: "2023-24" → current season
+  const currentSeasonStart = now.getMonth() >= 9 ? now.getFullYear() : now.getFullYear() - 1;
+  const currentSeason = `${currentSeasonStart}-${String(currentSeasonStart + 1).slice(2)}`;
+  result = result.replace(/\b2023-24\b/g, currentSeason);
+
+  return result;
 }
 
 // ─── Dataset loading ─────────────────────────────────────────────────────────
@@ -193,6 +415,8 @@ function loadTasks(): WebVoyagerTask[] {
       const task = JSON.parse(line) as WebVoyagerTask;
       // Adapt stale dates so travel sites (Booking, Google Flights) work with live web
       task.ques = adaptDatesInInstruction(task.ques);
+      // Make time-sensitive tasks idempotent (yesterday, today, current season)
+      task.ques = adaptTimeSensitiveInstruction(task.ques);
       return task;
     });
 
@@ -324,6 +548,10 @@ async function runSingleAttempt(
     maxSteps: MAX_STEPS,
     compactionThreshold: 0.6,
     verbose: 0,
+    // v2 features
+    siteKB: join(__dirname, "../../src/memory/default-site-kb.json"),
+    actionVerifier: true,
+    checkpointInterval: 5,
   });
 
   // Build instruction with cross-trial feedback

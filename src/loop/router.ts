@@ -177,6 +177,12 @@ export class ActionRouter {
           delegateMaxSteps: action.maxSteps,
         };
       }
+
+      case "fold": {
+        this.log.action(`fold "${action.summary.slice(0, 60)}"`);
+        // Storage handled in perception.ts — router just acknowledges
+        return { ok: true };
+      }
     }
   }
 

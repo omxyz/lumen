@@ -232,7 +232,27 @@ export class CDPTab implements BrowserTab {
       await this.session.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button, clickCount });
       await this.session.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button, clickCount });
       this.lastClickPx = { x, y };
-      return { ok: true };
+
+      // Post-click verification: check what element received focus
+      let clickInfo: string | undefined;
+      try {
+        clickInfo = await this.evaluate<string>(`
+          (() => {
+            const el = document.activeElement;
+            if (!el || el === document.body) return '';
+            const tag = el.tagName.toLowerCase();
+            const role = el.getAttribute('role') || '';
+            const label = el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.textContent?.slice(0, 40)?.trim() || '';
+            return tag + (role ? '[role=' + role + ']' : '') + (label ? ': ' + label : '');
+          })()
+        `);
+      } catch { /* evaluation can fail on cross-origin frames */ }
+
+      if (clickInfo) {
+        this.log.browser(`click focused: ${clickInfo}`);
+      }
+
+      return { ok: true, clickTarget: clickInfo || undefined };
     } catch (err) {
       this.log.browser(`click FAILED: ${err}`, { x, y, error: String(err) });
       return { ok: false, error: String(err) };
@@ -348,6 +368,33 @@ export class CDPTab implements BrowserTab {
           windowsVirtualKeyCode,
         });
         if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
+      }
+
+      // Post-type verification: check if the focused element actually received the text
+      let typeVerification: string | undefined;
+      try {
+        typeVerification = await this.evaluate<string>(`
+          (() => {
+            const el = document.activeElement;
+            if (!el) return '';
+            const tag = el.tagName.toLowerCase();
+            if (tag === 'input' || tag === 'textarea') {
+              return 'value:' + (el.value || '').slice(-60);
+            }
+            if (el.isContentEditable) {
+              return 'value:' + (el.textContent || '').slice(-60);
+            }
+            return 'no-input-focused';
+          })()
+        `);
+      } catch { /* cross-origin */ }
+
+      if (typeVerification === "no-input-focused") {
+        this.log.browser(`type WARNING: no input element focused — text may not have been captured`);
+        return { ok: true, error: "WARNING: no input element was focused during typing — text may not have been captured" };
+      }
+      if (typeVerification) {
+        this.log.browser(`type verified: ${typeVerification}`);
       }
       return { ok: true };
     } catch (err) {

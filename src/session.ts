@@ -8,6 +8,11 @@ import { SessionPolicy } from "./loop/policy.js";
 import { StateStore } from "./loop/state.js";
 import { HistoryManager } from "./loop/history.js";
 import { PerceptionLoop } from "./loop/perception.js";
+import type { ConfidenceGate } from "./loop/confidence-gate.js";
+import type { ActionVerifier } from "./loop/action-verifier.js";
+import type { CheckpointManager } from "./loop/checkpoint.js";
+import type { SiteKB } from "./memory/site-kb.js";
+import type { WorkflowMemory } from "./memory/workflow.js";
 import type {
   RunResult,
   PreActionHook,
@@ -66,6 +71,16 @@ export interface SessionOptions {
 
   /** Enable action caching. Pass a directory path to enable. */
   cacheDir?: string;
+  /** CATTS-inspired confidence gate: multi-sample on hard steps. */
+  confidenceGate?: ConfidenceGate;
+  /** Post-action verification heuristics. */
+  actionVerifier?: ActionVerifier;
+  /** Browser state checkpointing for backtracking. */
+  checkpointManager?: CheckpointManager;
+  /** Site-specific knowledge base. */
+  siteKB?: SiteKB;
+  /** Workflow memory for injecting past success patterns. */
+  workflowMemory?: WorkflowMemory;
 }
 
 export class Session {
@@ -126,6 +141,11 @@ export class Session {
       compactionAdapter: this.opts.compactionAdapter,
       log: this.log,
       cacheDir: this.opts.cacheDir,
+      confidenceGate: this.opts.confidenceGate,
+      actionVerifier: this.opts.actionVerifier,
+      checkpointManager: this.opts.checkpointManager,
+      siteKB: this.opts.siteKB,
+      workflowMemory: this.opts.workflowMemory,
     });
 
     // Prepend the per-run instruction to the session-level system prompt
