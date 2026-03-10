@@ -201,39 +201,6 @@ describe("RepeatDetector — URL stall detection", () => {
   });
 });
 
-describe("RepeatDetector — recentProductiveRatio", () => {
-  it("returns 1 when window is empty", () => {
-    const detector = new RepeatDetector();
-    expect(detector.recentProductiveRatio()).toBe(1);
-  });
-
-  it("returns 1 when all actions are productive", () => {
-    const detector = new RepeatDetector();
-    detector.record({ type: "click", x: 100, y: 200 });
-    detector.record({ type: "type", text: "hello" });
-    detector.record({ type: "goto", url: "https://example.com" });
-    expect(detector.recentProductiveRatio()).toBe(1);
-  });
-
-  it("returns 0 when all actions are non-productive", () => {
-    const detector = new RepeatDetector();
-    detector.record({ type: "scroll", x: 500, y: 500, direction: "down" as const, amount: 100 });
-    detector.record({ type: "screenshot" });
-    detector.record({ type: "scroll", x: 500, y: 500, direction: "down" as const, amount: 200 });
-    expect(detector.recentProductiveRatio()).toBe(0);
-  });
-
-  it("returns correct ratio for mixed actions", () => {
-    const detector = new RepeatDetector();
-    // 2 productive + 2 non-productive = 50%
-    detector.record({ type: "click", x: 100, y: 200 });
-    detector.record({ type: "scroll", x: 500, y: 500, direction: "down" as const, amount: 100 });
-    detector.record({ type: "type", text: "hello" });
-    detector.record({ type: "screenshot" });
-    expect(detector.recentProductiveRatio()).toBe(0.5);
-  });
-});
-
 describe("nudgeMessage", () => {
   it("returns mild nudge at level 5", () => {
     const msg = nudgeMessage(5);

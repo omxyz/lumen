@@ -66,10 +66,6 @@ export class HistoryManager {
     });
   }
 
-  getLastResponse(): ModelResponse | null {
-    return this.lastResponse;
-  }
-
   // ─── Semantic history (never compressed) ───────────────────────────────────
 
   semanticHistory(): SemanticStep[] {

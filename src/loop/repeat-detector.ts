@@ -68,13 +68,6 @@ export class RepeatDetector {
     return null;
   }
 
-  /** Returns the ratio of productive actions in the recent category window (0..1). */
-  recentProductiveRatio(): number {
-    if (this.categoryWindow.length === 0) return 1;
-    const productive = this.categoryWindow.filter(c => c === "productive").length;
-    return productive / this.categoryWindow.length;
-  }
-
   reset(): void {
     this.window.length = 0;
     this.categoryWindow.length = 0;
