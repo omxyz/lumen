@@ -1,6 +1,7 @@
 import { defineConfig } from "vitepress";
 
 export default defineConfig({
+  base: "/lumen/",
   title: "Lumen",
   description: "A vision-first browser agent with self-healing deterministic replay.",
   themeConfig: {
