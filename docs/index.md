@@ -2,8 +2,8 @@
 layout: home
 hero:
   name: Lumen
-  text: A vision-first browser agent with self-healing deterministic replay.
-  tagline: "Selectors break. AI agents loop forever. Lumen is the middle ground."
+  text: ""
+  tagline: A vision-first browser agent with self-healing deterministic replay.
   actions:
     - theme: brand
       text: Get Started
