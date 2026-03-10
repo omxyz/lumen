@@ -22,6 +22,6 @@ features:
     details: agent.stream() yields typed StreamEvent objects for real-time UI.
   - title: Safety
     details: Domain policies, action hooks, and completion verification gates.
-  - title: Session resumption
-    details: Serialize to JSON, restore with Agent.resume().
+  - title: Deterministic replay
+    details: Cache actions and replay them without the model. Self-heals when pages change.
 ---

@@ -43,7 +43,7 @@ export default defineConfig({
           { text: "Observability", link: "/guide/use-cases/observability" },
           { text: "Evaluations", link: "/guide/use-cases/evaluations" },
           { text: "MCP Integration", link: "/guide/use-cases/mcp" },
-          { text: "Deterministic Automation", link: "/guide/use-cases/deterministic" },
+          { text: "Deterministic Replay", link: "/guide/use-cases/deterministic" },
           { text: "Advanced", link: "/guide/use-cases/advanced" },
         ],
       },

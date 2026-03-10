@@ -1,4 +1,4 @@
-# Deterministic Automation
+# Deterministic Replay
 
 Run browser tasks without calling the model — replay cached actions from a previous successful run. When a cached action fails (page changed, element moved), Lumen self-heals by falling back to the model and updating the cache automatically.
 
