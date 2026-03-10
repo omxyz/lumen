@@ -19,7 +19,7 @@ interface AgentOptions {
   compactionModel?: string;          // override model used for compaction (defaults to main model)
   keepRecentScreenshots?: number;    // screenshots kept in wire history after compaction. default: 2
 
-  // ── v2 Features ─────────────────────────────────────────────────────
+  // ── Optional Features ──────────────────────────────────────────────
   confidenceGate?: boolean;          // CATTS-inspired multi-sample on hard steps
   actionVerifier?: boolean;          // heuristic post-action checks via CDP (click target, focus)
   checkpointInterval?: number;       // browser state checkpoint every N steps for backtracking. default: 5
@@ -48,7 +48,7 @@ interface AgentOptions {
 }
 ```
 
-### v2 Feature Details
+### Optional Feature Details
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|

@@ -249,7 +249,7 @@ export class Agent {
     // Determine initial history from pending (Agent.resume) or AgentOptions.initialHistory
     const initialHistory = this._pendingHistory ?? this.options.initialHistory;
 
-    // Initialize v2 features
+    // Initialize optional features
     let confidenceGate: import("./loop/confidence-gate.js").ConfidenceGate | undefined;
     if (this.options.confidenceGate) {
       const { ConfidenceGate } = await import("./loop/confidence-gate.js");

@@ -80,7 +80,7 @@ export { ConsoleMonitor, NoopMonitor } from "./loop/monitor";
 export type { LoopMonitor } from "./loop/monitor";
 export { StreamingMonitor } from "./loop/streaming-monitor";
 
-// v2 features
+// Optional features
 export { ConfidenceGate } from "./loop/confidence-gate";
 export type { ConfidenceGateOptions } from "./loop/confidence-gate";
 export { ActionVerifier } from "./loop/action-verifier";

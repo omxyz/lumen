@@ -155,11 +155,11 @@ const gate = new CustomGate(async (screenshot, url) => {
 
 ---
 
-## v2 Features
+## Optional Features
 
 **The problem:** basic screenshot-and-act works for simple tasks, but complex sites need smarter strategies — backtracking when stuck, domain-specific tips, learning from past runs.
 
-**The solution:** optional v2 modules, each enabled with a single flag in `AgentOptions`.
+**The solution:** optional modules, each enabled with a single flag in `AgentOptions`.
 
 ```typescript
 const agent = new Agent({
