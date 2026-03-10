@@ -55,7 +55,7 @@ function buildMessages(context: StepContext): Anthropic.MessageParam[] {
   // Screenshots are embedded INSIDE tool_results (matching Anthropic's computer-use protocol).
   // The model sees: tool_result(content=[image, "ok"]) — clearly linking the screenshot to the action.
   // Only the initial screenshot (before any assistant turn) is a standalone user image.
-  let pendingUserContent: Anthropic.MessageParam["content"] = [];
+  let pendingUserContent: Anthropic.ContentBlockParam[] = [];
   // Track the latest screenshot to embed in the next tool_result batch
   let pendingScreenshot: { base64: string; compressed: boolean; stepIndex: number } | null = null;
   // Track whether we've seen an assistant turn yet (to distinguish initial vs action screenshots)

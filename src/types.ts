@@ -110,6 +110,7 @@ export interface SerializedHistory {
   wireHistory: WireMessage[];
   semanticSteps: SemanticStep[];
   agentState: TaskState | null;
+  foldedSummaries?: string[];
 }
 
 // ─── Loop ─────────────────────────────────────────────────────────────────────
