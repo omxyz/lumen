@@ -12,7 +12,16 @@ export interface CachedAction {
   url: string;
   instructionHash: string;
   screenshotHash?: string;
+  viewport?: { width: number; height: number };
   args: Record<string, unknown>;
+}
+
+export function viewportMismatch(
+  cached: CachedAction,
+  current: { width: number; height: number },
+): boolean {
+  if (!cached.viewport) return false;
+  return cached.viewport.width !== current.width || cached.viewport.height !== current.height;
 }
 
 export class ActionCache {
@@ -24,6 +33,14 @@ export class ActionCache {
 
   cacheKey(actionType: string, url: string, instructionHash: string): string {
     const sig = `${actionType}:${url}:${instructionHash}`;
+    return createHash("sha256").update(sig).digest("hex").slice(0, 16);
+  }
+
+  /** Step-level cache key: url + instructionHash only (no action type, no screenshot hash).
+   *  Solves the chicken-and-egg problem (don't know action type before lookup).
+   *  Self-healing handles the case where the cached action is wrong for the current page state. */
+  stepKey(url: string, instructionHash: string): string {
+    const sig = `${url}:${instructionHash}`;
     return createHash("sha256").update(sig).digest("hex").slice(0, 16);
   }
 
@@ -50,6 +67,7 @@ export class ActionCache {
     url: string,
     instructionHash: string,
     currentScreenshotHash?: string,
+    viewport?: { width: number; height: number },
   ): Promise<void> {
     await fs.mkdir(this.dir, { recursive: true });
     const entry: CachedAction = {
@@ -58,6 +76,7 @@ export class ActionCache {
       url,
       instructionHash,
       screenshotHash: COORD_ACTIONS.has(action.type) ? currentScreenshotHash : undefined,
+      viewport,
       args: action as unknown as Record<string, unknown>,
     };
     await fs.writeFile(join(this.dir, `${key}.json`), JSON.stringify(entry));

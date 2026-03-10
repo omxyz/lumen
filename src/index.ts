@@ -65,7 +65,7 @@ export { ChildLoop } from "./loop/child";
 export type { ChildLoopOptions, ChildLoopResult } from "./loop/child";
 export { runPlanner } from "./loop/planner";
 export { RepeatDetector } from "./loop/repeat-detector";
-export { ActionCache } from "./loop/action-cache";
+export { ActionCache, viewportMismatch } from "./loop/action-cache";
 
 // Policy
 export { SessionPolicy } from "./loop/policy";

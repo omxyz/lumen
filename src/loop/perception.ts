@@ -10,7 +10,7 @@ import { ActionRouter, type RouterTiming } from "./router";
 import type { SessionPolicy } from "./policy";
 import { LumenLogger } from "../logger";
 import { RepeatDetector, nudgeMessage } from "./repeat-detector";
-import { ActionCache, screenshotHash } from "./action-cache";
+import { ActionCache, screenshotHash, viewportMismatch } from "./action-cache";
 import type { ConfidenceGate } from "./confidence-gate";
 import type { ActionVerifier } from "./action-verifier";
 import type { CheckpointManager } from "./checkpoint";
@@ -99,6 +99,67 @@ export class PerceptionLoop {
     this.checkpointManager = opts.checkpointManager;
     this.siteKB = opts.siteKB;
     this.workflowMemory = opts.workflowMemory;
+  }
+
+  /**
+   * Attempt to serve a step from cache.
+   * Returns cached action + outcome on hit, or null to fall through to model.
+   * Self-healing: if cached action fails execution, returns null so model can take over.
+   */
+  private async tryCache(
+    step: number,
+    url: string,
+    instructionHash: string,
+    screenshot: { data: Buffer; width: number; height: number },
+    tab: BrowserTab,
+  ): Promise<{ action: Action; outcome: ActionExecution } | null> {
+    if (!this.actionCache) return null;
+
+    try {
+      const key = this.actionCache.stepKey(url, instructionHash);
+      const cached = await this.actionCache.get(key);
+      if (!cached) return null;
+
+      this.log.loop(`step ${step + 1}: cache HIT — replaying ${cached.type} action`);
+
+      // Viewport mismatch warning (informational only)
+      const viewport = { width: screenshot.width, height: screenshot.height };
+      if (viewportMismatch(cached, viewport)) {
+        this.log.loop(
+          `step ${step + 1}: viewport mismatch — cached ${cached.viewport?.width}x${cached.viewport?.height}, current ${viewport.width}x${viewport.height}`,
+        );
+      }
+
+      // Reconstruct Action from cached args
+      const action = cached.args as unknown as Action;
+
+      // Execute via router — this is where self-healing kicks in
+      const outcome = await this.router.execute(action, tab, this.state);
+
+      if (!outcome.ok) {
+        // Self-healing: cached action failed, fall through to model
+        this.log.loop(`step ${step + 1}: cached action FAILED (${outcome.error}) — self-healing via model`);
+        return null;
+      }
+
+      // Success — inject synthetic wire history (noop pattern from line 490)
+      const toolCallId = `toolu_cache_${Date.now()}`;
+      const syntheticResponse: ModelResponse = {
+        actions: [action],
+        toolCallIds: [toolCallId],
+        thinking: undefined,
+        usage: { inputTokens: 0, outputTokens: 0 },
+        rawResponse: null,
+      };
+      this.history.appendResponse(syntheticResponse);
+      this.history.appendActionOutcome(action, outcome);
+
+      return { action, outcome };
+    } catch (err) {
+      // Fail-open: any cache error → silently fall through to model
+      this.log.loop(`step ${step + 1}: cache error — ${err}`);
+      return null;
+    }
   }
 
   async run(options: LoopOptions): Promise<LoopResult> {
@@ -233,6 +294,67 @@ export class PerceptionLoop {
       };
 
       this.monitor.stepStarted(step, context);
+
+      // ── Cache-hit fast path ──────────────────────────────────────────────────
+      if (options.instructionHash) {
+        const cacheResult = await this.tryCache(step, this.tab.url(), options.instructionHash, screenshot, this.tab);
+        if (cacheResult) {
+          const { action, outcome } = cacheResult;
+
+          // Record in repeat detector (prevents stuck loops from cached repeats)
+          const repeatLevel = this.repeatDetector.record(action);
+          if (repeatLevel !== null) {
+            pendingNudge = nudgeMessage(repeatLevel);
+            nudgeSource = "action";
+          }
+
+          // Handle termination
+          if (outcome.terminated) {
+            const result: LoopResult = {
+              status: outcome.status!,
+              result: outcome.result!,
+              steps: step + 1,
+              history: [],
+              agentState: this.state.current(),
+            };
+            this.history.appendSemanticStep({
+              stepIndex: step,
+              url: this.tab.url(),
+              screenshotBase64: screenshot.data.toString("base64"),
+              thinking: undefined,
+              actions: [{ action, outcome: { ok: outcome.ok, error: outcome.error } }],
+              agentState: this.state.current(),
+              tokenUsage: { inputTokens: 0, outputTokens: 0 },
+              durationMs: 0,
+            });
+            result.history = this.history.semanticHistory();
+            this.monitor.stepCompleted(step, { actions: [action], usage: { inputTokens: 0, outputTokens: 0 }, rawResponse: null } as ModelResponse);
+            this.monitor.terminated(result);
+            return result;
+          }
+
+          // Record in semantic history
+          this.history.appendSemanticStep({
+            stepIndex: step,
+            url: this.tab.url(),
+            screenshotBase64: screenshot.data.toString("base64"),
+            thinking: undefined,
+            actions: [{ action, outcome: { ok: outcome.ok, error: outcome.error } }],
+            agentState: this.state.current(),
+            tokenUsage: { inputTokens: 0, outputTokens: 0 },
+            durationMs: 0,
+          });
+
+          // Emit monitor callbacks (streaming parity)
+          this.monitor.actionExecuted(step, action, outcome);
+          this.monitor.stepCompleted(step, { actions: [action], usage: { inputTokens: 0, outputTokens: 0 }, rawResponse: null } as ModelResponse);
+
+          // Tier-1 screenshot compression
+          this.history.compressScreenshots(this.keepRecentScreenshots);
+          continue; // skip model call, next step
+        }
+      }
+      // ── End cache-hit fast path ──────────────────────────────────────────────
 
       const stepStart = Date.now();
       const stepActions: SemanticStep["actions"] = [];
@@ -410,8 +532,9 @@ export class PerceptionLoop {
 
         // 5g. Action cache — store successful actions for replay on future runs
         if (this.actionCache && outcome.ok && options.instructionHash) {
-          const key = this.actionCache.cacheKey(action.type, this.tab.url(), options.instructionHash);
-          this.actionCache.set(key, action, this.tab.url(), options.instructionHash, currentScreenshotHash).catch(() => {
+          const key = this.actionCache.stepKey(this.tab.url(), options.instructionHash);
+          const viewport = { width: screenshot.width, height: screenshot.height };
+          this.actionCache.set(key, action, this.tab.url(), options.instructionHash, currentScreenshotHash, viewport).catch(() => {
             // Cache write failures are non-fatal
           });
         }
