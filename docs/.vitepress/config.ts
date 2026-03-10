@@ -2,7 +2,7 @@ import { defineConfig } from "vitepress";
 
 export default defineConfig({
   title: "Lumen",
-  description: "Vision-first browser agent for Node.js",
+  description: "A vision-first browser agent with self-healing deterministic replay.",
   themeConfig: {
     nav: [
       { text: "Guide", link: "/guide/quickstart" },

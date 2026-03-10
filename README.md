@@ -1,6 +1,6 @@
 # @omxyz/lumen
 
-Vision-first browser agent for Node.js. Give it a task in plain English; it drives a real browser using screenshots and model-emitted actions to get it done.
+A vision-first browser agent with self-healing deterministic replay.
 
 ## WebVoyager Benchmark (preliminary)
 
