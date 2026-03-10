@@ -15,6 +15,8 @@ Research papers and projects that influenced Lumen's design and implementation.
 
 | Paper | Impact on Lumen |
 |-------|-----------------|
+| **Surfer 2** — WebVoyager SOTA (97.1%) | `StateStore` + `Verifier` + `plannerModel` — persistent context, validator-based completion gate, orchestrator planning |
+| **Magnitude** — WebVoyager (93.9%) | `ActionCache` + prompt caching + tier-1 screenshot compression — deterministic caching, observation masking, latency reduction |
 | **CATTS** — Confidence-Aware Test-Time Scaling (2026) | `ConfidenceGate` — multi-sample on hard steps, skip extra compute on easy ones |
 | **BacktrackAgent** — Error Detection + Backtracking (EMNLP 2025) | `ActionVerifier` — heuristic post-action checks (click target, input focus, goto host) |
 | **Tree Search with Browser Snapshots** (ICLR 2025, CMU) | `CheckpointManager` — save CDP state every N steps, backtrack on level 8+ stuck |
