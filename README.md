@@ -358,6 +358,40 @@ See [docs/architecture/comparison.md](docs/architecture/comparison.md) for a tec
 
 **ESM import errors** — this package is ESM-only. Use `"moduleResolution": "bundler"` or `"nodenext"` in `tsconfig.json`.
 
+## References
+
+Research papers and projects that influenced Lumen's design.
+
+### Projects
+
+| Project | Impact on Lumen |
+|---------|-----------------|
+| **[Stagehand](https://github.com/browserbase/stagehand)** | CUA mode reference — ActCache with DOM fingerprinting inspired self-healing deterministic replay |
+| **[browser-use](https://github.com/browser-use/browser-use)** | Vision + DOM hybrid architecture, multi-tab support, agent chain design |
+| **[Claude Code](https://claude.com/claude-code)** | Agentic loop design — tool-use pattern, streaming actions, context compaction strategy |
+
+### Papers
+
+| Paper | Impact on Lumen |
+|-------|-----------------|
+| **Surfer 2** — WebVoyager SOTA (97.1%) | `StateStore` + `Verifier` + `plannerModel` — persistent context, completion gate, orchestrator planning |
+| **Magnitude** — WebVoyager (93.9%) | `ActionCache` + prompt caching + tier-1 screenshot compression |
+| **CATTS** — Confidence-Aware Test-Time Scaling (2026) | `ConfidenceGate` — multi-sample on hard steps, skip extra compute on easy ones |
+| **BacktrackAgent** — Error Detection + Backtracking (EMNLP 2025) | `ActionVerifier` — heuristic post-action checks |
+| **Tree Search with Browser Snapshots** (ICLR 2025, CMU) | `CheckpointManager` — save CDP state, backtrack on deep stalls |
+| **ColorBrowserAgent** — Adaptive Knowledge Base (2026) | `SiteKB` — domain-specific navigation rules |
+| **Agent Workflow Memory** (ICML 2025) [arXiv 2409.07429](https://arxiv.org/abs/2409.07429) | `WorkflowMemory` — reusable routines from successful runs |
+| **AgentFold** — Proactive Context Folding (Alibaba 2025) [arXiv 2510.24699](https://arxiv.org/abs/2510.24699) | `fold` action — agent-controlled context compression |
+| **OpenCUA** — Three-Level Reasoning (COLM 2025) [arXiv 2508.09123](https://arxiv.org/abs/2508.09123) | Structured reasoning prompts — THINK FIRST, CHECKPOINT PROGRESS |
+| **TTI** — Test-Time Interaction Scaling (NeurIPS 2025) | Action-biased prompts — favor exploration over long reasoning |
+| **Reflexion** (NeurIPS 2023) [arXiv 2303.11366](https://arxiv.org/abs/2303.11366) | Retry with judge feedback — structured reflection on retry attempts |
+| **Agent Q** — Best-of-N Sampling (ICLR 2025) [arXiv 2408.07199](https://arxiv.org/abs/2408.07199) | Confidence gate design — scoring vs agreement voting tradeoffs |
+| **SeeAct** — Vision+DOM Grounding (ICML 2024) [arXiv 2401.01614](https://arxiv.org/abs/2401.01614) | Validated vision-first design — pure vision grounding as main bottleneck |
+| **Agent-E** — Hierarchical Planner-Executor (2024) [arXiv 2407.13032](https://arxiv.org/abs/2407.13032) | `delegate` action — hand off sub-tasks to a child loop |
+| **DigiRL** — VLM-Based Progress Evaluation (NeurIPS 2024) [arXiv 2406.11896](https://arxiv.org/abs/2406.11896) | `RepeatDetector` design — progress evaluation beyond pattern matching |
+
+See [docs/reference/references.md](docs/reference/references.md) for full details on each reference.
+
 ## License
 
 MIT
