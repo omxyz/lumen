@@ -1,37 +1,46 @@
 #!/usr/bin/env tsx
 /**
- * WebVoyager Evaluation Runner for Lumen
- *
- * Matches Stagehand's evaluation methodology for apples-to-apples comparison:
- *   - Judge: Gemini 2.5 Flash (same as Stagehand's V3Evaluator)
- *   - Judge prompt: "expert evaluator that confidently returns YES or NO" (same prompt)
- *   - Screenshots: Final screenshot sent to judge with agent reasoning
- *   - Trials: 3 per task (same as Stagehand's trialCount: 3)
- *   - Tasks: 25 default (same as Stagehand's default)
- *   - Max steps: 50 (same as Stagehand)
+ * WebVoyager Evaluation Runner
  *
  * Usage:
- *   npx tsx --env-file .env evals/webvoyager/run.ts                # default: 25 tasks, 3 trials, stratified
- *   LIMIT=642 TRIALS=1 npx tsx --env-file .env evals/webvoyager/run.ts  # all tasks, no retries
- *   SAMPLE=random npx tsx --env-file .env evals/webvoyager/run.ts  # Stagehand-style random sampling
- *   SAMPLE=sequential npx tsx --env-file .env evals/webvoyager/run.ts  # first 25 tasks in order
- *   MODEL=google/gemini-2.0-flash npx tsx --env-file .env evals/webvoyager/run.ts
- *   SITES=Allrecipes,GitHub npx tsx --env-file .env evals/webvoyager/run.ts
+ *   npm run eval                    # 25 tasks, lumen (default)
+ *   npm run eval -- 5               # 5 tasks, lumen
+ *   npm run eval -- 25 stagehand    # 25 tasks, stagehand
+ *   npm run eval -- 25 browser-use  # 25 tasks, browser-use
+ *
+ * Optional env vars:
+ *   MODEL=google/gemini-2.0-flash   # agent model (default: anthropic/claude-sonnet-4-6)
+ *   SITES=Allrecipes,GitHub         # filter to specific sites
+ *   DATA_FILE=diverse_sample.jsonl  # alternate dataset
  */
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Agent } from "../../src/index.js";
+import { Agent, ModelVerifier } from "../../src/index.js";
+import { AnthropicAdapter } from "../../src/model/anthropic.js";
 import { GoogleGenAI } from "@google/genai";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
+
+type Framework = "lumen" | "stagehand" | "browser-use";
 
 interface WebVoyagerTask {
   web_name: string;
   id: string;
   ques: string;
   web: string;
+}
+
+interface AttemptResult {
+  result: string;
+  status: string;
+  steps: number;
+  tokens: number;
+  durationMs: number;
+  screenshot?: Buffer;
+  error?: string;
 }
 
 interface TaskResult {
@@ -52,9 +61,9 @@ interface TaskResult {
 
 interface EvalReport {
   timestamp: string;
+  framework: string;
   model: string;
   judgeModel: string;
-  methodology: string;
   trials: number;
   total: number;
   passed: number;
@@ -71,11 +80,27 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_PATH = process.env.DATA_FILE
   ? join(__dirname, process.env.DATA_FILE)
   : join(__dirname, "data.jsonl");
-const MAX_STEPS = parseInt(process.env.MAX_STEPS ?? "50");
-const TASK_TIMEOUT_MS = 600_000; // 10 minutes per task attempt
-const TRIALS = parseInt(process.env.TRIALS ?? "3"); // Stagehand default: 3
-const DEFAULT_LIMIT = 25; // Stagehand default: 25 tasks
+const MAX_STEPS = 50;
+const TASK_TIMEOUT_MS = 600_000;
+const TRIALS = 3;
+const DEFAULT_LIMIT = 25;
 const JUDGE_MODEL = "gemini-2.5-flash";
+const VENV_PYTHON = join(__dirname, ".venv/bin/python3");
+const BROWSER_USE_SCRIPT = join(__dirname, "browser_use_webvoyager.py");
+
+function parseArgs(): { limit: number; framework: Framework } {
+  const args = process.argv.slice(2);
+  let limit = DEFAULT_LIMIT;
+  let framework: Framework = "lumen";
+  for (const arg of args) {
+    if (/^\d+$/.test(arg)) {
+      limit = parseInt(arg);
+    } else if (arg === "lumen" || arg === "stagehand" || arg === "browser-use") {
+      framework = arg;
+    }
+  }
+  return { limit, framework };
+}
 
 function resolveModelAndKey(): { model: string; apiKey: string | undefined } {
   const model = process.env.MODEL ?? "anthropic/claude-sonnet-4-6";
@@ -87,21 +112,15 @@ function resolveModelAndKey(): { model: string; apiKey: string | undefined } {
 
 // ─── Date adaptation ─────────────────────────────────────────────────────────
 
-/**
- * Shift stale dates in task instructions to equivalent future dates.
- *
- * The WebVoyager dataset was created in late 2023 / early 2024 and contains
- * hardcoded dates (e.g. "January 25, 2024"). Travel sites (Google Flights,
- * Booking.com) reject past dates, making these tasks impossible on the live web.
- *
- * This function shifts past dates forward by the minimum number of whole years
- * needed to make them at least 2 weeks in the future, preserving month/day and
- * relative date gaps within a single instruction.
- */
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/**
+ * Shift stale dates in task instructions to equivalent future dates.
+ * The WebVoyager dataset contains hardcoded 2023/2024 dates that travel
+ * sites reject. This shifts them forward preserving relative gaps.
+ */
 function adaptDatesInInstruction(instruction: string): string {
   const now = new Date();
   const twoWeeksFromNow = new Date(now.getTime() + 14 * 86400000);
@@ -117,7 +136,6 @@ function adaptDatesInInstruction(instruction: string): string {
   };
   const yearPattern = /\b(20(?:23|24|25))\b/g;
 
-  // Check if any stale years exist
   const yearsFound = new Set<number>();
   let match: RegExpExecArray | null;
   while ((match = yearPattern.exec(instruction)) !== null) {
@@ -136,12 +154,10 @@ function adaptDatesInInstruction(instruction: string): string {
       "July", "August", "September", "October", "November", "December",
     ];
 
-    // Parse date expressions: "Month Day[, Year]" and "Day Month[ Year]"
     const fullDateRe = new RegExp(
       `(${allMonths})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s*(20\\d{2}))?`,
       "gi",
     );
-    // Also match "8 March 2024" (day before month)
     const dayFirstRe = new RegExp(
       `(\\d{1,2})\\s+(${allMonths})\\.?(?:\\s+(20\\d{2}))?`,
       "gi",
@@ -149,8 +165,7 @@ function adaptDatesInInstruction(instruction: string): string {
     interface ParsedDate { month: string; day: number; year: number; fullMatch: string; index: number; }
     const parsedDates: ParsedDate[] = [];
     const coveredRanges: Array<[number, number]> = [];
-    // First pass: day-first ("8 March 2024") — check these first to avoid
-    // fullDateRe falsely matching "March 20" from "March 2024"
+
     while ((match = dayFirstRe.exec(instruction)) !== null) {
       const day = parseInt(match[1]!);
       if (day < 1 || day > 31) continue;
@@ -159,14 +174,14 @@ function adaptDatesInInstruction(instruction: string): string {
       parsedDates.push({ month, day, year, fullMatch: match[0], index: match.index });
       coveredRanges.push([match.index, match.index + match[0].length]);
     }
-    // Second pass: month-first ("February 10, 2024") — skip if overlaps day-first
+
     while ((match = fullDateRe.exec(instruction)) !== null) {
       const mi = match.index;
       const me = mi + match[0].length;
       if (coveredRanges.some(([s, e]) => mi >= s && mi < e)) continue;
       const month = expandMonth(match[1]!);
       const day = parseInt(match[2]!);
-      if (day > 31) continue; // Reject "March 20" from "March 2024" (day=20 is OK but let's be safe)
+      if (day > 31) continue;
       let year = match[3] ? parseInt(match[3]) : 0;
       if (!year) {
         const after = instruction.slice(me, me + 20);
@@ -179,7 +194,6 @@ function adaptDatesInInstruction(instruction: string): string {
     }
 
     if (parsedDates.length === 0) {
-      // No parseable dates, just shift years
       const minYear = Math.min(...yearsFound);
       const yearShift = twoWeeksFromNow.getFullYear() - minYear;
       if (yearShift <= 0) return instruction;
@@ -190,19 +204,17 @@ function adaptDatesInInstruction(instruction: string): string {
       return result.replace(/today\s*\([^)]*\)/gi, "today");
     }
 
-    // Find earliest date and compute day-delta to land it ~45 days from now
     const earliest = parsedDates.reduce((min, d) => {
       const date = new Date(`${d.month} ${d.day}, ${d.year}`);
       const minDate = new Date(`${min.month} ${min.day}, ${min.year}`);
       return date < minDate ? d : min;
     });
     const earliestDate = new Date(`${earliest.month} ${earliest.day}, ${earliest.year}`);
-    const targetDate = new Date(now.getTime() + 45 * 86400000); // 45 days from now
+    const targetDate = new Date(now.getTime() + 45 * 86400000);
     const dayDelta = Math.round((targetDate.getTime() - earliestDate.getTime()) / 86400000);
 
-    if (dayDelta <= 0) return instruction; // Already in the future
+    if (dayDelta <= 0) return instruction;
 
-    // Shift all dates by the same dayDelta, preserving relative gaps
     const maxFuture = new Date(now.getTime() + 300 * 86400000);
     const shiftedDates = parsedDates.map((d) => {
       const orig = new Date(`${d.month} ${d.day}, ${d.year}`);
@@ -210,12 +222,10 @@ function adaptDatesInInstruction(instruction: string): string {
       return { ...d, shifted };
     });
 
-    // Validate all shifted dates are in usable window
     const allValid = shiftedDates.every(
       (d) => d.shifted >= twoWeeksFromNow && d.shifted <= maxFuture,
     );
     if (!allValid) {
-      // Fallback: just do year shift capped at current year
       const minYear = Math.min(...yearsFound);
       const yearShift = now.getFullYear() - minYear;
       if (yearShift <= 0) return instruction;
@@ -226,16 +236,13 @@ function adaptDatesInInstruction(instruction: string): string {
       return result.replace(/today\s*\([^)]*\)/gi, "today");
     }
 
-    // Replace dates in reverse order to preserve indices
     let result = instruction;
     for (const d of [...shiftedDates].sort((a, b) => b.index - a.index)) {
       const newMonth = monthsFull[d.shifted.getMonth()]!;
       const newDay = d.shifted.getDate();
       const newYear = d.shifted.getFullYear();
 
-      // Match the original date expression at this position (including year if present)
       const origSlice = result.slice(d.index, d.index + d.fullMatch.length + 10);
-      // Check if year follows the match
       const hasYear = /^,?\s*20\d{2}/.test(origSlice.slice(d.fullMatch.length));
       const endPos = hasYear
         ? d.index + origSlice.match(new RegExp(`^${escapeRegex(d.fullMatch)},?\\s*20\\d{2}`))![0].length
@@ -244,7 +251,6 @@ function adaptDatesInInstruction(instruction: string): string {
       result = result.slice(0, d.index) + `${newMonth} ${newDay}, ${newYear}` + result.slice(endPos);
     }
 
-    // Replace any remaining bare year references
     const minYear = Math.min(...yearsFound);
     const yearShift = Math.round(dayDelta / 365);
     result = result.replace(/\b(20(?:23|24|25))\b/g, (yearStr) => {
@@ -254,9 +260,6 @@ function adaptDatesInInstruction(instruction: string): string {
     return result.replace(/today\s*\([^)]*\)/gi, "today");
   }
 
-  // Fallback: no explicit years, but month+day patterns exist (e.g. "December 28th",
-  // "January 1-4", "December 25-26"). These are implicitly "current year" but may
-  // already be in the past. Use day-delta to shift into 45-300 day window.
   const monthsFull = [
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December",
@@ -269,28 +272,14 @@ function adaptDatesInInstruction(instruction: string): string {
   while ((match = yearlessDatePattern.exec(instruction)) !== null) {
     const day = parseInt(match[2]!);
     if (day > 31) continue;
-    yearlessDates.push({
-      month: match[1]!,
-      day,
-      index: match.index,
-      fullMatch: match[0],
-    });
+    yearlessDates.push({ month: match[1]!, day, index: match.index, fullMatch: match[0] });
   }
-  // Also match day-first: "20 December"
-  const yearlessDayFirstRe = new RegExp(
-    `(\\d{1,2})\\s+(${allMonths})\\.?`,
-    "gi",
-  );
+  const yearlessDayFirstRe = new RegExp(`(\\d{1,2})\\s+(${allMonths})\\.?`, "gi");
   while ((match = yearlessDayFirstRe.exec(instruction)) !== null) {
     const day = parseInt(match[1]!);
     if (day < 1 || day > 31) continue;
     if (yearlessDates.some((d) => match!.index >= d.index && match!.index < d.index + d.fullMatch.length)) continue;
-    yearlessDates.push({
-      month: match[2]!,
-      day,
-      index: match.index,
-      fullMatch: match[0],
-    });
+    yearlessDates.push({ month: match[2]!, day, index: match.index, fullMatch: match[0] });
   }
 
   if (yearlessDates.length === 0) return instruction;
@@ -303,7 +292,6 @@ function adaptDatesInInstruction(instruction: string): string {
   }
   if (!needsShift) return instruction;
 
-  // Shift earliest date to ~45 days from now using day-delta
   const earliestYearless = yearlessDates.reduce((min, d) => {
     const date = new Date(`${expandMonth(d.month)} ${d.day}, ${currentYear}`);
     const minDate = new Date(`${expandMonth(min.month)} ${min.day}, ${currentYear}`);
@@ -320,11 +308,9 @@ function adaptDatesInInstruction(instruction: string): string {
     const orig = new Date(`${expandMonth(d.month)} ${d.day}, ${currentYear}`);
     const shifted = new Date(orig.getTime() + dayDelta * 86400000);
     if (shifted < twoWeeksFromNow || shifted > maxFuture) continue;
-
     const newMonth = monthsFull[shifted.getMonth()]!;
     const newDay = shifted.getDate();
     const newYear = shifted.getFullYear();
-
     const end = d.index + d.fullMatch.length;
     const after = result.slice(end, end + 10).trim();
     if (/^,?\s*20\d{2}/.test(after)) continue;
@@ -334,59 +320,46 @@ function adaptDatesInInstruction(instruction: string): string {
   return result.replace(/today\s*\([^)]*\)/gi, "today");
 }
 
-/**
- * Make time-sensitive instructions idempotent by:
- * 1. Replacing "yesterday" with an actual recent date
- * 2. Replacing "today" with the current date
- * 3. Adding season context for "current season/leaders" references
- * 4. Replacing "2023-24" season references with current season
- */
 function adaptTimeSensitiveInstruction(instruction: string): string {
   const now = new Date();
   const yesterday = new Date(now.getTime() - 86400000);
-
   const formatDate = (d: Date) =>
     d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 
   let result = instruction;
-
-  // Replace "yesterday" with actual date
-  result = result.replace(
-    /\byesterday\b/gi,
-    formatDate(yesterday),
-  );
-
-  // Replace standalone "today" (not part of "today's date") with actual date
-  result = result.replace(
-    /\btoday(?:'s date)?\b/gi,
-    formatDate(now),
-  );
-
-  // Update season references: "2023-24" → current season
+  result = result.replace(/\byesterday\b/gi, formatDate(yesterday));
+  result = result.replace(/\btoday(?:'s date)?\b/gi, formatDate(now));
   const currentSeasonStart = now.getMonth() >= 9 ? now.getFullYear() : now.getFullYear() - 1;
   const currentSeason = `${currentSeasonStart}-${String(currentSeasonStart + 1).slice(2)}`;
   result = result.replace(/\b2023-24\b/g, currentSeason);
-
   return result;
 }
 
 // ─── Dataset loading ─────────────────────────────────────────────────────────
 
-/** Fisher-Yates shuffle (same algorithm as Stagehand's sampleUniform) */
-function sampleUniform<T>(arr: T[], k: number): T[] {
-  const n = arr.length;
-  if (k >= n) return arr.slice();
+/** Seeded PRNG (mulberry32) for deterministic sampling across frameworks */
+function seededRng(seed: number): () => number {
+  return () => {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+const rng = seededRng(42);
+
+function shuffle<T>(arr: T[]): T[] {
   const copy = arr.slice();
-  for (let i = n - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
     const tmp = copy[i]!;
     copy[i] = copy[j]!;
     copy[j] = tmp;
   }
-  return copy.slice(0, k);
+  return copy;
 }
 
-/** Stratified sampling: pick up to `perSite` tasks per site, randomly */
 function sampleStratified(tasks: WebVoyagerTask[], total: number): WebVoyagerTask[] {
   const bySite = new Map<string, WebVoyagerTask[]>();
   for (const t of tasks) {
@@ -398,29 +371,24 @@ function sampleStratified(tasks: WebVoyagerTask[], total: number): WebVoyagerTas
   const perSite = Math.max(1, Math.ceil(total / sites.length));
   const result: WebVoyagerTask[] = [];
   for (const site of sites) {
-    const pool = bySite.get(site)!;
-    const sampled = sampleUniform(pool, perSite);
-    result.push(...sampled);
+    const pool = shuffle(bySite.get(site)!);
+    result.push(...pool.slice(0, perSite));
   }
-  // If we have more than needed (due to rounding), trim
-  return result.length > total ? sampleUniform(result, total) : result;
+  return result.length > total ? shuffle(result).slice(0, total) : result;
 }
 
-function loadTasks(): WebVoyagerTask[] {
+function loadTasks(limit: number): WebVoyagerTask[] {
   const raw = readFileSync(DATA_PATH, "utf-8");
   const allTasks = raw
     .split("\n")
     .filter(Boolean)
     .map((line) => {
       const task = JSON.parse(line) as WebVoyagerTask;
-      // Adapt stale dates so travel sites (Booking, Google Flights) work with live web
       task.ques = adaptDatesInInstruction(task.ques);
-      // Make time-sensitive tasks idempotent (yesterday, today, current season)
       task.ques = adaptTimeSensitiveInstruction(task.ques);
       return task;
     });
 
-  // Filter by site if specified
   const sitesEnv = process.env.SITES;
   let filtered = allTasks;
   if (sitesEnv) {
@@ -428,39 +396,22 @@ function loadTasks(): WebVoyagerTask[] {
     filtered = allTasks.filter((t) => sites.has(t.web_name.toLowerCase()));
   }
 
-  const limit = parseInt(process.env.LIMIT ?? String(DEFAULT_LIMIT));
-
-  // SAMPLE=random — Stagehand-style random uniform sampling
-  // SAMPLE=stratified (default) — even distribution across sites
-  // SAMPLE=sequential — first N tasks in order
-  const sampleMode = process.env.SAMPLE ?? "stratified";
-  if (sampleMode === "random") {
-    return sampleUniform(filtered, limit);
-  } else if (sampleMode === "sequential") {
-    const offset = parseInt(process.env.OFFSET ?? "0");
-    return filtered.slice(offset, offset + limit);
-  } else {
-    // stratified: ensure diverse site coverage
-    return sampleStratified(filtered, limit);
+  // TASKS env var: run specific task IDs (comma-separated)
+  const tasksEnv = process.env.TASKS;
+  if (tasksEnv) {
+    const ids = new Set(tasksEnv.split(",").map((s) => s.trim()));
+    return filtered.filter((t) => ids.has(t.id));
   }
+
+  return sampleStratified(filtered, limit);
 }
 
-// ─── Gemini 2.5 Flash Judge (matches Stagehand V3Evaluator) ─────────────────
+// ─── Judge ───────────────────────────────────────────────────────────────────
 
 const gemini = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY ?? "",
 });
 
-/**
- * Judge using Gemini 2.5 Flash with screenshot — matches Stagehand's V3Evaluator exactly.
- *
- * Stagehand's evaluator prompt:
- *   System: "You are an expert evaluator that confidently returns YES or NO based on
- *            if the original goal was achieved."
- *   User: "Question: {question}\n\nAgent's reasoning and actions taken:\n{agentReasoning}"
- *          + screenshot image
- *   Output: { evaluation: "YES"|"NO", reasoning: string }
- */
 async function judgeResult(
   question: string,
   agentResult: string,
@@ -479,10 +430,7 @@ async function judgeResult(
 
     if (screenshot) {
       userParts.push({
-        inlineData: {
-          mimeType: "image/jpeg",
-          data: screenshot.toString("base64"),
-        },
+        inlineData: { mimeType: "image/jpeg", data: screenshot.toString("base64") },
       });
     }
 
@@ -514,7 +462,7 @@ async function judgeResult(
   }
 }
 
-// ─── Runner ──────────────────────────────────────────────────────────────────
+// ─── Framework runners ───────────────────────────────────────────────────────
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -526,21 +474,18 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   });
 }
 
-/**
- * Run a single attempt of a task. Uses the Agent class directly (not Agent.run())
- * so we can capture a final screenshot before closing the browser.
- *
- * If previousFeedback is provided (from a failed trial's judge), it's appended
- * to the instruction so the agent can learn from the previous failure.
- */
-async function runSingleAttempt(
-  task: WebVoyagerTask,
+async function runLumen(
+  instruction: string,
+  startUrl: string,
   model: string,
   apiKey: string | undefined,
-  trial: number,
-  previousFeedback?: string,
-): Promise<TaskResult> {
+): Promise<AttemptResult> {
   const start = Date.now();
+  // Build a lightweight adapter for the ModelVerifier (termination gate)
+  const verifierAdapter = new AnthropicAdapter(
+    model.replace("anthropic/", ""),
+    apiKey,
+  );
   const agent = new Agent({
     model,
     apiKey,
@@ -548,236 +493,281 @@ async function runSingleAttempt(
     maxSteps: MAX_STEPS,
     compactionThreshold: 0.6,
     verbose: 0,
-    // v2 features
     siteKB: join(__dirname, "../../src/memory/default-site-kb.json"),
     actionVerifier: true,
     checkpointInterval: 5,
+    verifier: new ModelVerifier(verifierAdapter, instruction),
   });
-
-  // Build instruction with cross-trial feedback
-  let instruction = task.ques;
-  if (previousFeedback && trial > 1) {
-    instruction += `\n\n[IMPORTANT: A previous attempt at this task failed. The evaluator said: "${previousFeedback}". Try a DIFFERENT approach this time. If form interactions (date pickers, dropdowns) aren't working, try typing values directly into input fields, or construct a URL with the required parameters and navigate directly.]`;
-  }
 
   try {
     const agentResult = await withTimeout(
-      agent.run({
-        instruction,
-        maxSteps: MAX_STEPS,
-        startUrl: task.web,
-      }),
+      agent.run({ instruction, maxSteps: MAX_STEPS, startUrl }),
       TASK_TIMEOUT_MS,
-      task.id,
+      "lumen",
     );
 
-    // Capture final screenshot before closing the browser
     let screenshot: Buffer | undefined;
-    try {
-      const screenshotResult = await agent.tab.screenshot();
-      screenshot = screenshotResult.data;
-    } catch {
-      // Screenshot may fail if page crashed; that's ok
-    }
-
+    try { screenshot = (await agent.tab.screenshot()).data; } catch { /* page may have crashed */ }
     await agent.close();
 
-    const resultText =
-      agentResult.status === "success"
-        ? agentResult.result
-        : `[${agentResult.status}] ${agentResult.result}`;
-    const totalTokens =
-      agentResult.tokenUsage.inputTokens + agentResult.tokenUsage.outputTokens;
-
-    // Judge: always send to judge (including maxSteps) — Stagehand judges all results
-    const judge = await judgeResult(task.ques, resultText, screenshot);
-
     return {
-      id: task.id,
-      web_name: task.web_name,
-      question: task.ques,
-      startUrl: task.web,
-      agentResult: resultText,
-      agentStatus: agentResult.status,
+      result: agentResult.status === "success"
+        ? agentResult.result
+        : `[${agentResult.status}] ${agentResult.result}`,
+      status: agentResult.status,
       steps: agentResult.steps,
-      tokens: totalTokens,
+      tokens: agentResult.tokenUsage.inputTokens + agentResult.tokenUsage.outputTokens,
       durationMs: Date.now() - start,
-      judgePass: judge.pass,
-      judgeReason: judge.reason,
-      trial,
+      screenshot,
     };
   } catch (err) {
     await agent.close().catch(() => {});
-    return {
-      id: task.id,
-      web_name: task.web_name,
-      question: task.ques,
-      startUrl: task.web,
-      agentResult: "",
-      agentStatus: "error",
-      steps: 0,
-      tokens: 0,
-      durationMs: Date.now() - start,
-      judgePass: false,
-      judgeReason: `Runtime error: ${String(err).slice(0, 200)}`,
-      error: String(err),
-      trial,
-    };
+    return { result: "", status: "error", steps: 0, tokens: 0, durationMs: Date.now() - start, error: String(err) };
   }
 }
 
-/**
- * Run a task with up to TRIALS attempts (matching Stagehand's trial system).
- * Returns the first passing result, or the last attempt if all fail.
- */
+async function runStagehand(
+  instruction: string,
+  startUrl: string,
+  model: string,
+): Promise<AttemptResult> {
+  const start = Date.now();
+  let stagehand: any = null;
+
+  try {
+    const { Stagehand } = await import("@browserbasehq/stagehand");
+    stagehand = new Stagehand({ env: "LOCAL", verbose: 0, disablePino: true, localBrowserLaunchOptions: { headless: false } });
+    await stagehand.init();
+
+    const pages = (stagehand as any).context.pages();
+    if (pages.length > 0) await pages[0].goto(startUrl, { waitUntil: "domcontentloaded" });
+
+    const agent = stagehand.agent({ mode: "cua", model: model as any } as any);
+    const agentResult: any = await withTimeout(agent.execute({ instruction, maxSteps: MAX_STEPS }), TASK_TIMEOUT_MS, "stagehand");
+
+    let screenshot: Buffer | undefined;
+    try {
+      const currentPages = (stagehand as any).context.pages();
+      if (currentPages.length > 0) screenshot = await currentPages[0].screenshot({ type: "jpeg", quality: 75 });
+    } catch { /* page may have closed */ }
+
+    await stagehand.close();
+
+    return {
+      result: agentResult.success ? (agentResult.message ?? "") : `[incomplete] ${agentResult.message ?? ""}`,
+      status: agentResult.success ? "success" : "maxSteps",
+      steps: agentResult.actions?.length ?? 0,
+      tokens: agentResult.usage ? agentResult.usage.input_tokens + agentResult.usage.output_tokens : 0,
+      durationMs: Date.now() - start,
+      screenshot,
+    };
+  } catch (err) {
+    if (stagehand) try { await stagehand.close(); } catch { /* ignore */ }
+    return { result: "", status: "error", steps: 0, tokens: 0, durationMs: Date.now() - start, error: String(err) };
+  }
+}
+
+async function runBrowserUse(
+  instruction: string,
+  startUrl: string,
+  model: string,
+): Promise<AttemptResult> {
+  const start = Date.now();
+
+  const args = JSON.stringify({ task_name: "webvoyager", instruction, start_url: startUrl, max_steps: MAX_STEPS });
+
+  return new Promise<AttemptResult>((resolve) => {
+    const proc = spawn(VENV_PYTHON, [BROWSER_USE_SCRIPT, args], {
+      env: { ...process.env, MODEL: model },
+      timeout: TASK_TIMEOUT_MS,
+    });
+
+    let stdout = "";
+    let stderr = "";
+    proc.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
+    proc.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+
+    proc.on("close", () => {
+      try {
+        const json = JSON.parse(stdout.trim());
+        let screenshot: Buffer | undefined;
+        if (json.screenshot_b64) screenshot = Buffer.from(json.screenshot_b64, "base64");
+        resolve({
+          result: json.result ?? "",
+          status: json.passed ? "success" : json.error ? "error" : "maxSteps",
+          steps: json.steps ?? 0,
+          tokens: json.tokens ?? 0,
+          durationMs: Date.now() - start,
+          screenshot,
+          error: json.error ?? undefined,
+        });
+      } catch {
+        resolve({
+          result: "",
+          status: "error",
+          steps: 0,
+          tokens: 0,
+          durationMs: Date.now() - start,
+          error: `parse error — stdout: ${stdout.slice(0, 200)} | stderr: ${stderr.slice(0, 200)}`,
+        });
+      }
+    });
+
+    proc.on("error", (err) => {
+      resolve({ result: "", status: "error", steps: 0, tokens: 0, durationMs: Date.now() - start, error: `spawn error: ${err.message}` });
+    });
+  });
+}
+
+// ─── Task runner ─────────────────────────────────────────────────────────────
+
+async function runSingleAttempt(
+  framework: Framework,
+  task: WebVoyagerTask,
+  model: string,
+  apiKey: string | undefined,
+  trial: number,
+  previousFeedback?: string,
+): Promise<TaskResult> {
+  let instruction = task.ques;
+  if (previousFeedback && trial > 1) {
+    instruction += `\n\n[IMPORTANT: A previous attempt at this task failed. The evaluator said: "${previousFeedback}". Try a DIFFERENT approach this time.]`;
+  }
+
+  let attempt: AttemptResult;
+  switch (framework) {
+    case "lumen":
+      attempt = await runLumen(instruction, task.web, model, apiKey);
+      break;
+    case "stagehand":
+      attempt = await runStagehand(instruction, task.web, model);
+      break;
+    case "browser-use":
+      attempt = await runBrowserUse(instruction, task.web, model);
+      break;
+  }
+
+  const judge = await judgeResult(task.ques, attempt.result, attempt.screenshot);
+
+  return {
+    id: task.id,
+    web_name: task.web_name,
+    question: task.ques,
+    startUrl: task.web,
+    agentResult: attempt.result,
+    agentStatus: attempt.status,
+    steps: attempt.steps,
+    tokens: attempt.tokens,
+    durationMs: attempt.durationMs,
+    judgePass: judge.pass,
+    judgeReason: judge.reason,
+    trial,
+    error: attempt.error,
+  };
+}
+
 async function runTask(
+  framework: Framework,
   task: WebVoyagerTask,
   model: string,
   apiKey: string | undefined,
 ): Promise<TaskResult> {
   let lastFeedback: string | undefined;
   for (let trial = 1; trial <= TRIALS; trial++) {
-    const result = await runSingleAttempt(task, model, apiKey, trial, lastFeedback);
-    if (result.judgePass || trial === TRIALS) {
-      return result;
-    }
-    // Pass judge feedback to next trial so agent can try a different approach
+    const result = await runSingleAttempt(framework, task, model, apiKey, trial, lastFeedback);
+    if (result.judgePass || trial === TRIALS) return result;
     lastFeedback = result.judgeReason;
     process.stdout.write(`  [retry ${trial}/${TRIALS}] `);
   }
-  // Unreachable, but TypeScript needs this
   throw new Error("Unreachable");
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const tasks = loadTasks();
+  const { limit, framework } = parseArgs();
+  const tasks = loadTasks(limit);
   const { model, apiKey } = resolveModelAndKey();
 
-  const sampleMode = process.env.SAMPLE ?? "stratified";
-  // Log which tasks were selected (for reproducibility)
   const siteDistribution = new Map<string, number>();
   for (const t of tasks) {
     siteDistribution.set(t.web_name, (siteDistribution.get(t.web_name) ?? 0) + 1);
   }
 
-  console.log("WebVoyager Evaluation (Stagehand methodology)");
-  console.log(`  Agent model: ${model}`);
-  console.log(`  Judge model: ${JUDGE_MODEL}`);
-  console.log(`  Tasks: ${tasks.length} (${sampleMode} sampling)`);
+  console.log("WebVoyager Evaluation");
+  console.log(`  Framework: ${framework}  |  Model: ${model}  |  Judge: ${JUDGE_MODEL}`);
+  console.log(`  Tasks: ${tasks.length}  |  Trials: ${TRIALS}  |  Max steps: ${MAX_STEPS}`);
   console.log(`  Sites: ${[...siteDistribution.entries()].map(([s, n]) => `${s}(${n})`).join(", ")}`);
-  console.log(`  Trials per task: ${TRIALS}`);
-  console.log(`  Max steps per task: ${MAX_STEPS}`);
-  console.log(`  Timeout per attempt: ${TASK_TIMEOUT_MS / 1000}s`);
   console.log();
 
-  // Incremental results file
   const outDir = join(__dirname, "results");
   mkdirSync(outDir, { recursive: true });
-  const outFile = join(
-    outDir,
-    `webvoyager-stagehand-${model.replace("/", "-")}-${Date.now()}.json`,
-  );
+  const outFile = join(outDir, `webvoyager-${framework}-${model.replace("/", "-")}-${Date.now()}.json`);
 
   const results: TaskResult[] = [];
   let passed = 0;
 
   for (let i = 0; i < tasks.length; i++) {
     const task = tasks[i]!;
-    process.stdout.write(
-      `[${i + 1}/${tasks.length}] ${task.id} (${task.web_name})... `,
-    );
+    process.stdout.write(`[${i + 1}/${tasks.length}] ${task.id} (${task.web_name})... `);
 
-    const result = await runTask(task, model, apiKey);
+    const result = await runTask(framework, task, model, apiKey);
     results.push(result);
 
     if (result.judgePass) passed++;
     const status = result.judgePass ? "PASS" : "FAIL";
     const trialTag = result.trial > 1 ? ` (trial ${result.trial})` : "";
     const time = (result.durationMs / 1000).toFixed(1);
-    console.log(
-      `[${status}${trialTag}] steps=${result.steps} tokens=${result.tokens.toLocaleString()} time=${time}s`,
-    );
+    console.log(`[${status}${trialTag}] steps=${result.steps} tokens=${result.tokens.toLocaleString()} time=${time}s`);
     if (!result.judgePass) {
       console.log(`    Reason: ${result.judgeReason.slice(0, 120)}`);
     }
 
-    // Save incrementally every 5 tasks
-    if (results.length % 5 === 0) {
-      saveReport(outFile, model, results, passed);
-    }
+    if (results.length % 5 === 0) saveReport(outFile, framework, model, results, passed);
   }
 
-  // Final save + summary
-  saveReport(outFile, model, results, passed);
-  printSummary(model, results, passed, outFile);
+  saveReport(outFile, framework, model, results, passed);
+  printSummary(framework, model, results, passed, outFile);
 }
 
-function saveReport(outFile: string, model: string, results: TaskResult[], passed: number): void {
+function saveReport(outFile: string, framework: string, model: string, results: TaskResult[], passed: number): void {
   const successResults = results.filter((r) => !r.error);
-  const avgSteps =
-    successResults.length > 0
-      ? successResults.reduce((s, r) => s + r.steps, 0) / successResults.length
-      : 0;
-  const avgTokens =
-    successResults.length > 0
-      ? successResults.reduce((s, r) => s + r.tokens, 0) / successResults.length
-      : 0;
-  const avgDuration =
-    successResults.length > 0
-      ? successResults.reduce((s, r) => s + r.durationMs, 0) / successResults.length
-      : 0;
+  const avg = (fn: (r: TaskResult) => number) =>
+    successResults.length > 0 ? successResults.reduce((s, r) => s + fn(r), 0) / successResults.length : 0;
 
   const report: EvalReport = {
     timestamp: new Date().toISOString(),
+    framework,
     model,
     judgeModel: JUDGE_MODEL,
-    methodology: "stagehand-compatible",
     trials: TRIALS,
     total: results.length,
     passed,
     passRate: results.length > 0 ? passed / results.length : 0,
-    avgSteps: Math.round(avgSteps * 10) / 10,
-    avgTokens: Math.round(avgTokens),
-    avgDurationMs: Math.round(avgDuration),
+    avgSteps: Math.round(avg((r) => r.steps) * 10) / 10,
+    avgTokens: Math.round(avg((r) => r.tokens)),
+    avgDurationMs: Math.round(avg((r) => r.durationMs)),
     results,
   };
 
   writeFileSync(outFile, JSON.stringify(report, null, 2));
 }
 
-function printSummary(model: string, results: TaskResult[], passed: number, outFile: string): void {
+function printSummary(framework: string, model: string, results: TaskResult[], passed: number, outFile: string): void {
   const successResults = results.filter((r) => !r.error);
-  const avgSteps =
-    successResults.length > 0
-      ? successResults.reduce((s, r) => s + r.steps, 0) / successResults.length
-      : 0;
-  const avgTokens =
-    successResults.length > 0
-      ? successResults.reduce((s, r) => s + r.tokens, 0) / successResults.length
-      : 0;
-  const avgDuration =
-    successResults.length > 0
-      ? successResults.reduce((s, r) => s + r.durationMs, 0) / successResults.length
-      : 0;
+  const avg = (fn: (r: TaskResult) => number) =>
+    successResults.length > 0 ? successResults.reduce((s, r) => s + fn(r), 0) / successResults.length : 0;
   const retriedCount = results.filter((r) => r.trial > 1).length;
 
   console.log("\n" + "=".repeat(60));
-  console.log("RESULTS (Stagehand-compatible methodology)");
+  console.log("RESULTS");
   console.log("=".repeat(60));
-  console.log(`  Agent model:  ${model}`);
-  console.log(`  Judge model:  ${JUDGE_MODEL}`);
-  console.log(`  Trials:       ${TRIALS} per task`);
-  console.log(`  Total tasks:  ${results.length}`);
-  console.log(`  Passed:       ${passed}`);
-  console.log(`  Pass rate:    ${((passed / results.length) * 100).toFixed(1)}%`);
-  console.log(`  Retried:      ${retriedCount} tasks needed retry`);
-  console.log(`  Avg steps:    ${avgSteps.toFixed(1)}`);
-  console.log(`  Avg tokens:   ${Math.round(avgTokens).toLocaleString()}`);
-  console.log(`  Avg time:     ${(avgDuration / 1000).toFixed(1)}s`);
+  console.log(`  Framework:   ${framework}`);
+  console.log(`  Model:       ${model}  |  Judge: ${JUDGE_MODEL}`);
+  console.log(`  Pass rate:   ${passed}/${results.length} (${((passed / results.length) * 100).toFixed(1)}%)`);
+  console.log(`  Retried:     ${retriedCount} tasks`);
+  console.log(`  Avg steps:   ${avg((r) => r.steps).toFixed(1)}  |  Avg tokens: ${Math.round(avg((r) => r.tokens)).toLocaleString()}  |  Avg time: ${(avg((r) => r.durationMs) / 1000).toFixed(1)}s`);
 
-  // Per-site breakdown
   const siteMap = new Map<string, { pass: number; total: number }>();
   for (const r of results) {
     const entry = siteMap.get(r.web_name) ?? { pass: 0, total: 0 };
@@ -787,9 +777,7 @@ function printSummary(model: string, results: TaskResult[], passed: number, outF
   }
   console.log("\n  Per-site:");
   for (const [site, { pass, total }] of [...siteMap.entries()].sort()) {
-    console.log(
-      `    ${site.padEnd(20)} ${pass}/${total} (${((pass / total) * 100).toFixed(0)}%)`,
-    );
+    console.log(`    ${site.padEnd(20)} ${pass}/${total} (${((pass / total) * 100).toFixed(0)}%)`);
   }
 
   console.log(`\nReport saved: ${outFile}`);

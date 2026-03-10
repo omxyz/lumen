@@ -2,6 +2,21 @@
 
 Vision-first browser agent for Node.js. Give it a task in plain English; it drives a real browser using screenshots and model-emitted actions to get it done.
 
+## WebVoyager Benchmark (preliminary)
+
+Subset of 25 tasks from [WebVoyager](https://github.com/MinorJerry/WebVoyager), stratified across 15 sites. Scored by LLM-as-judge (Gemini 2.5 Flash), 3 trials per task. Lumen runs with SiteKB (domain-specific navigation tips) and ModelVerifier (termination gate) enabled.
+
+| Metric | Lumen | browser-use | Stagehand |
+|--------|-------|-------------|-----------|
+| **Success Rate** | **25/25 (100%)** | **25/25 (100%)** | 19/25 (76%) |
+| **Avg Steps (all)** | 14.4 | 8.8 | 23.1 |
+| **Avg Steps (passed)** | 14.4 | 8.8 | 15.7 |
+| **Avg Time (all)** | **77.8s** | 109.8s | 207.8s |
+| **Avg Time (passed)** | **77.8s** | 136.0s | 136.0s |
+| **Avg Tokens** | 104K | N/A | 200K |
+
+All frameworks use Claude Sonnet 4.6 as the agent model.
+
 ```typescript
 import { Agent } from "@omlabs/lumen";
 
@@ -243,31 +258,13 @@ Surfaces: `LUMEN_LOG_CDP`, `LUMEN_LOG_ACTIONS`, `LUMEN_LOG_BROWSER`, `LUMEN_LOG_
 
 ## Eval
 
-Abbreviated [WebVoyager](https://github.com/MinorJerry/WebVoyager) benchmark (25 tasks, `claude-sonnet-4-6`):
-
-| Metric | Score |
-|---|---|
-| **Pass rate** | **96.0% (24/25)** |
-| Avg steps per task | 12.3 |
-| Avg tokens per task | 84K |
-| Avg time per task | 86.9s |
-| Token reduction (vs baseline) | 32.1% |
-
-Per-task breakdown:
-
-| Task | Steps | Token reduction |
-|---|---|---|
-| wikipedia_shannon | 4 | 5.6% |
-| github_react_version | 3 | ~0% |
-| hacker_news_top | 1 | 0% |
-| allrecipes_wellington | 14 | 39.7% |
-
-Token savings scale with task length — long tasks (20+ steps) routinely exceed 40% reduction.
-
-Run evals yourself:
+Run [WebVoyager](https://github.com/MinorJerry/WebVoyager) evals yourself:
 
 ```bash
-ANTHROPIC_API_KEY=sk-... npx tsx evals/webvoyager/run.ts
+npm run eval              # 25 tasks, lumen (default)
+npm run eval -- 5         # 5 tasks
+npm run eval -- 25 stagehand    # compare with stagehand
+npm run eval -- 25 browser-use  # compare with browser-use
 ```
 
 ## Testing
@@ -280,16 +277,65 @@ npm run typecheck
 
 ## Architecture
 
+The core is a **perception loop** — screenshot, think, act, repeat — running over CDP:
+
 ```
-Agent → Session → PerceptionLoop
-  ├── HistoryManager (wire + semantic, 2-tier compression)
-  ├── ActionRouter (pixel dispatch + timing)
-  ├── ModelAdapter (stream/step/summarize)
-  ├── StateStore (writeState memory)
-  ├── RepeatDetector (3-layer stuck detection)
-  ├── Verifier (completion verification)
-  └── ActionCache (on-disk replay)
+                    ┌──────────────────────────────────────┐
+                    │           PerceptionLoop              │
+                    │                                      │
+ ┌────────┐   ┌────┴─────┐   ┌───────────┐   ┌─────────┐ │
+ │ Chrome ├──▶│Screenshot├──▶│  History   ├──▶│  Build  │ │
+ │ (CDP)  │   └──────────┘   │  Manager   │   │ Context │ │
+ │        │                  │            │   │         │ │
+ │        │                  │ tier-1:    │   │ + state │ │
+ │        │                  │  compress  │   │ + KB    │ │
+ │        │                  │ tier-2:    │   │ + nudge │ │
+ │        │                  │  summarize │   └────┬────┘ │
+ │        │                  └────────────┘        │      │
+ │        │                                        ▼      │
+ │        │   ┌──────────┐   ┌────────────────────────┐   │
+ │        │   │  Action   │   │    Model Adapter       │   │
+ │        │◀──┤  Router   │◀──┤  (stream actions)      │   │
+ │        │   │          │   │                        │   │
+ │        │   │ click    │   │  Anthropic / Google /  │   │
+ │        │   │ type     │   │  OpenAI / Custom       │   │
+ │        │   │ scroll   │   └────────────────────────┘   │
+ │        │   │ goto     │                                │
+ │        │   └────┬─────┘                                │
+ │        │        │                                      │
+ │        │        ▼                                      │
+ │        │   ┌──────────────────┐                        │
+ │        │   │  Post-Action     │                        │
+ │        │   │                  │                        │
+ │        │   │ ActionVerifier   │◀─ heuristic checks     │
+ │        │   │ RepeatDetector   │◀─ 3-layer stuck detect │
+ │        │   │ Checkpoint       │◀─ save for backtrack   │
+ │        │   └────────┬─────────┘                        │
+ │        │            │                                  │
+ │        │            ▼                                  │
+ │        │   ┌──────────────────┐                        │
+ │        │   │  task_complete?  │                        │
+ │        │   │                  │     ┌──────────┐       │
+ │        │   │  yes ──────────────▶│ Verifier │       │
+ │        │   │                  │     │  (gate)  │       │
+ │        │   │                  │     └────┬─────┘       │
+ │        │   └──────────────────┘          │             │
+ └────────┘                          pass ──▶ done        │
+                                     fail ──▶ continue    │
+                    └──────────────────────────────────────┘
 ```
+
+**Step by step:**
+
+1. **Screenshot** — capture the browser viewport via CDP
+2. **History** — append to wire history; if context exceeds threshold, compress (tier-1: drop old screenshots, tier-2: LLM summarization)
+3. **Context** — assemble system prompt with persistent state, site-specific tips (SiteKB), stuck nudges, and workflow hints
+4. **Model** — stream actions from the model (supports Anthropic, Google, OpenAI, or any OpenAI-compatible endpoint)
+5. **Execute** — ActionRouter dispatches each action to Chrome via CDP (click, type, scroll, goto, etc.)
+6. **Verify action** — ActionVerifier runs heuristic post-checks (did the click land? is an input focused after type?)
+7. **Detect loops** — RepeatDetector checks 3 layers: exact action repeats, category dominance, URL stall. Escalating nudges guide the model out
+8. **Checkpoint** — periodically save browser state; backtrack on deep stalls (level 8+)
+9. **Termination gate** — when the model calls `task_complete`, the Verifier (ModelVerifier or custom) checks the screenshot to confirm. Rejected? Loop continues. Passed? Return result.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full breakdown.
 

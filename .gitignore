@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .env
+.venv/
+.omc/
 *.local
 
 # Build artifacts outside dist/
