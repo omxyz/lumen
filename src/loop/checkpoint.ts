@@ -1,5 +1,5 @@
-import type { BrowserTab } from "../browser/tab.js";
-import type { TaskState } from "../types.js";
+import type { BrowserTab } from "../browser/tab";
+import type { TaskState } from "../types";
 
 export interface BrowserCheckpoint {
   step: number;

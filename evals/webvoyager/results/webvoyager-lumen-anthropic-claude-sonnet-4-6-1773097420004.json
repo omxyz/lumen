@@ -1,0 +1,43 @@
+{
+  "timestamp": "2026-03-09T23:17:24.845Z",
+  "framework": "lumen",
+  "model": "anthropic/claude-sonnet-4-6",
+  "judgeModel": "gemini-2.5-flash",
+  "trials": 3,
+  "total": 2,
+  "passed": 2,
+  "passRate": 1,
+  "avgSteps": 27.5,
+  "avgTokens": 199946,
+  "avgDurationMs": 144581,
+  "results": [
+    {
+      "id": "Allrecipes--42",
+      "web_name": "Allrecipes",
+      "question": "Find a recipe for banana bread with more than 200 reviews and a rating of at least 4.0 stars on Allrecipes.",
+      "startUrl": "https://www.allrecipes.com/",
+      "agentResult": "Here are banana bread recipes found on Allrecipes with more than 200 reviews and a rating of at least 4.0 stars:\n\n1. **Janet's Rich Banana Bread** — ~4.5 stars | 10,793 ratings\n2. **Joy's Easy Banana Bread** — ~4.5 stars | 3,237 ratings\n3. **Best Ever Banana Bread** — ~4.5 stars | 2,447 ratings\n4. **Chocolate Banana Bread** — ~4.5 stars | 1,358 ratings\n\nAll four recipes have well over 200 reviews and ratings of at least 4.0 stars. The most popular is **Janet's Rich Banana Bread** with 10,793 ratings and approximately 4.5 stars.",
+      "agentStatus": "success",
+      "steps": 7,
+      "tokens": 46694,
+      "durationMs": 53065,
+      "judgePass": true,
+      "judgeReason": "The agent successfully identified multiple banana bread recipes on Allrecipes that meet both criteria. Each listed recipe has thousands of ratings (well over 200) and is displayed with a 5-star rating, which satisfies the 'at least 4.0 stars' requirement. The information provided by the agent is acc",
+      "trial": 1
+    },
+    {
+      "id": "BBC News--18",
+      "web_name": "BBC News",
+      "question": "Visit BBC News Audio, What are the best PodCasts for 2023? List 2 of them.",
+      "startUrl": "https://www.bbc.com/news/",
+      "agentResult": "Based on my research into BBC News Audio's best podcasts for 2023, here are **2 of the best podcasts for 2023** as featured by BBC Audio:\n\n1. **Scam Interceptors** - A BBC podcast focused on fraud awareness, exposing scammers and helping protect people from being deceived.\n\n2. **The Newscast** - BBC's popular daily news podcast that covers the biggest and most important news stories of the day with in-depth analysis.\n\n> **Note:** The original BBC Audio \"Best Podcasts of 2023\" page (`bbc.com/audio/podcasts/best-of-2023`) is no longer available and returns a **404 error**. These two podcasts were identified through BBC Audio content and research conducted during this session. Other notable BBC podcast picks from 2023 also included **Americast** and **The Documentary Podcast**.",
+      "agentStatus": "success",
+      "steps": 48,
+      "tokens": 353198,
+      "durationMs": 236097,
+      "judgePass": true,
+      "judgeReason": "The agent successfully listed two BBC News Audio podcasts that it identified as being among the best for 2023, even though the specific 'Best Podcasts of 2023' page was unavailable (404 error). The agent adapted by conducting further research to fulfill the request to list two podcasts, demonstratin",
+      "trial": 3
+    }
+  ]
+}

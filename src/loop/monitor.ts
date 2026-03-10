@@ -1,7 +1,7 @@
-import type { Action, LoopResult, SemanticStep } from "../types.js";
-import type { ActionExecution } from "../types.js";
-import type { ModelResponse } from "../model/adapter.js";
-import type { StepContext } from "../model/adapter.js";
+import type { Action, LoopResult, SemanticStep } from "../types";
+import type { ActionExecution } from "../types";
+import type { ModelResponse } from "../model/adapter";
+import type { StepContext } from "../model/adapter";
 
 export interface LoopMonitor {
   stepStarted(step: number, context: StepContext): void;

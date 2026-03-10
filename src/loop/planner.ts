@@ -1,5 +1,5 @@
-import type { ModelAdapter } from "../model/adapter.js";
-import type { ScreenshotResult } from "../types.js";
+import type { ModelAdapter } from "../model/adapter";
+import type { ScreenshotResult } from "../types";
 
 export async function runPlanner(
   instruction: string,

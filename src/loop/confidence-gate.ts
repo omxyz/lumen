@@ -1,5 +1,5 @@
-import type { ModelAdapter, StepContext, ModelResponse } from "../model/adapter.js";
-import type { Action } from "../types.js";
+import type { ModelAdapter, StepContext, ModelResponse } from "../model/adapter";
+import type { Action } from "../types";
 
 export interface ConfidenceGateOptions {
   adapter: ModelAdapter;

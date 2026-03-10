@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { StateStore } from "../../src/loop/state.js";
-import type { TaskState } from "../../src/types.js";
+import { StateStore } from "../../src/loop/state";
+import type { TaskState } from "../../src/types";
 
 const mockState: TaskState = {
   currentUrl: "https://example.com",

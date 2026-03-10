@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { RepeatDetector, nudgeMessage } from "../../src/loop/repeat-detector.js";
+import { RepeatDetector, nudgeMessage } from "../../src/loop/repeat-detector";
 
 describe("RepeatDetector", () => {
   it("returns null when no repeats", () => {

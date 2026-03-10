@@ -1,5 +1,5 @@
-import type { BrowserTab } from "./tab.js";
-import type { ViewportSize } from "../types.js";
+import type { BrowserTab } from "./tab";
+import type { ViewportSize } from "../types";
 
 export class ViewportManager {
   private current_: ViewportSize;

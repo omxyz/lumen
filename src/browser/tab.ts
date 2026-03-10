@@ -1,4 +1,4 @@
-import type { ActionOutcome, ScreenshotOptions, ScreenshotResult, ViewportSize } from "../types.js";
+import type { ActionOutcome, ScreenshotOptions, ScreenshotResult, ViewportSize } from "../types";
 
 export interface ClickOptions {
   button?: "left" | "right" | "middle";

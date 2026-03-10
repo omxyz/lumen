@@ -1,5 +1,5 @@
-import type { BrowserTab } from "../browser/tab.js";
-import type { Action, ActionOutcome } from "../types.js";
+import type { BrowserTab } from "../browser/tab";
+import type { Action, ActionOutcome } from "../types";
 
 export interface ActionVerification {
   success: boolean;

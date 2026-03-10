@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { PerceptionLoop } from "../../src/loop/perception.js";
-import { HistoryManager } from "../../src/loop/history.js";
-import { StateStore } from "../../src/loop/state.js";
-import { MockBrowserTab } from "./mock-tab.js";
-import { MockAdapter } from "./mock-adapter.js";
-import type { StepContext, ModelResponse } from "../../src/model/adapter.js";
-import type { Action, TaskState, WireMessage } from "../../src/types.js";
+import { PerceptionLoop } from "../../src/loop/perception";
+import { HistoryManager } from "../../src/loop/history";
+import { StateStore } from "../../src/loop/state";
+import { MockBrowserTab } from "./mock-tab";
+import { MockAdapter } from "./mock-adapter";
+import type { StepContext, ModelResponse } from "../../src/model/adapter";
+import type { Action, TaskState, WireMessage } from "../../src/types";
 
 /** Adapter that returns high token counts to trigger compaction, then terminates. */
 class HighTokenAdapter {

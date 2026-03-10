@@ -1,11 +1,11 @@
-import type { ModelAdapter } from "./model/adapter.js";
-import type { BrowserTab } from "./browser/tab.js";
-import type { Verifier } from "./loop/verifier.js";
-import type { LoopMonitor } from "./loop/monitor.js";
-import type { RouterTiming } from "./loop/router.js";
-import type { SessionPolicyOptions } from "./loop/policy.js";
-import { Session } from "./session.js";
-import { LumenLogger } from "./logger.js";
+import type { ModelAdapter } from "./model/adapter";
+import type { BrowserTab } from "./browser/tab";
+import type { Verifier } from "./loop/verifier";
+import type { LoopMonitor } from "./loop/monitor";
+import type { RouterTiming } from "./loop/router";
+import type { SessionPolicyOptions } from "./loop/policy";
+import { Session } from "./session";
+import { LumenLogger } from "./logger";
 import type {
   AgentOptions,
   RunResult,
@@ -14,7 +14,7 @@ import type {
   RunOptions,
   SemanticStep,
   SerializedAgent,
-} from "./types.js";
+} from "./types";
 
 // Lazy imports for browser/model to avoid loading unused deps
 async function createAdapter(

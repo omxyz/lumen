@@ -19,11 +19,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { PerceptionLoop } from "../../src/loop/perception.js";
-import { HistoryManager } from "../../src/loop/history.js";
-import { StateStore } from "../../src/loop/state.js";
-import { MockBrowserTab } from "./mock-tab.js";
-import { MockAdapter } from "./mock-adapter.js";
+import { PerceptionLoop } from "../../src/loop/perception";
+import { HistoryManager } from "../../src/loop/history";
+import { StateStore } from "../../src/loop/state";
+import { MockBrowserTab } from "./mock-tab";
+import { MockAdapter } from "./mock-adapter";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -106,8 +106,8 @@ describe("Challenge 1: empty actions / text-only response fallback", () => {
 // We test CDPTab directly by constructing a minimal fake CDPSession.
 // This isolates the URL bar state machine from the rest of the stack.
 
-import type { CDPSessionLike } from "../../src/browser/cdp.js";
-import { CDPTab } from "../../src/browser/cdptab.js";
+import type { CDPSessionLike } from "../../src/browser/cdp";
+import { CDPTab } from "../../src/browser/cdptab";
 
 /** Minimal fake CDPSession — records sent commands; never fires events. */
 class FakeCDPSession implements CDPSessionLike {
@@ -281,7 +281,7 @@ describe("Challenge 2: CDPTab URL bar emulation", () => {
 // would send to the haiku model. We mock the Anthropic client to capture
 // the actual message content.
 
-import type { WireMessage } from "../../src/types.js";
+import type { WireMessage } from "../../src/types";
 
 describe("Challenge 3: summarize() strips base64 from wireHistory", () => {
   /**

@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { PerceptionLoop } from "../../src/loop/perception.js";
-import { HistoryManager } from "../../src/loop/history.js";
-import { StateStore } from "../../src/loop/state.js";
-import { CustomGate } from "../../src/loop/verifier.js";
-import { MockBrowserTab } from "./mock-tab.js";
-import { MockAdapter } from "./mock-adapter.js";
+import { PerceptionLoop } from "../../src/loop/perception";
+import { HistoryManager } from "../../src/loop/history";
+import { StateStore } from "../../src/loop/state";
+import { CustomGate } from "../../src/loop/verifier";
+import { MockBrowserTab } from "./mock-tab";
+import { MockAdapter } from "./mock-adapter";
 
 describe("Verifier integration in PerceptionLoop", () => {
   it("rejects terminate when verifier fails and loop continues", async () => {

@@ -1,5 +1,5 @@
 import { WebSocket } from "ws";
-import { LumenLogger } from "../logger.js";
+import { LumenLogger } from "../logger";
 
 interface CDPMessage {
   id?: number;

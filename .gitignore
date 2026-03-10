@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .env
+docs/.vitepress/cache
+docs/.vitepress/dist
 .venv/
 .omc/
 *.local

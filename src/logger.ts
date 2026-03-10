@@ -1,4 +1,4 @@
-import type { LogLine } from "./types.js";
+import type { LogLine } from "./types";
 
 type LogLevel = "debug" | "info" | "warn" | "error" | "silent";
 

@@ -1,0 +1,57 @@
+{
+  "timestamp": "2026-03-09T23:57:42.501Z",
+  "framework": "stagehand",
+  "model": "anthropic/claude-sonnet-4-6",
+  "judgeModel": "gemini-2.5-flash",
+  "trials": 3,
+  "total": 3,
+  "passed": 3,
+  "passRate": 1,
+  "avgSteps": 15.3,
+  "avgTokens": 116995,
+  "avgDurationMs": 144862,
+  "results": [
+    {
+      "id": "Allrecipes--22",
+      "web_name": "Allrecipes",
+      "question": "Find a recipe for a healthy avocado salad on Allrecipes that has a preparation time of less than 20 minutes and more than 30 user reviews. Include the nutritional information per serving.",
+      "startUrl": "https://www.allrecipes.com/",
+      "agentResult": "I now have the complete nutritional information! I have all the information needed to provide a comprehensive summary of the recipe. Let me now compile all the information I've gathered from the Allrecipes website.\n\nHere is a complete summary of the healthy avocado salad recipe found on Allrecipes that meets all the criteria:\n\n---\n\n## 🥑 Avocado Salad — Allrecipes\n**🔗 Source:** [allrecipes.com](https://www.allrecipes.com/recipe/14744/avocado-salad/)\n\n---\n\n### ✅ Recipe Qualifications Met:\n| Criteria | Status |\n|---|---|\n| Prep Time < 20 minutes | ✅ **15 minutes** |\n| More than 30 user reviews | ✅ **248 reviews** (4.7 ⭐ rating, 340 ratings) |\n\n---\n\n### ⏱️ Time & Servings\n- **Prep Time:** 15 minutes\n- **Total Time:** 15 minutes\n- **Servings:** 6\n\n---\n\n### 🛒 Ingredients\n- 3 avocados, peeled, pitted, and cubed\n- 1 pint cherry tomatoes, halved\n- 1 cucumber, cubed\n- 1 small red onion, diced\n- ¼ cup chopped fresh cilantro\n- 3 tablespoons olive oil\n- 2 tablespoons lime juice (or red wine vinegar)\n- Salt and black pepper to taste\n\n---\n\n### 👨‍🍳 Directions\n1. **Combine** avocados, tomatoes, cucumber, and red onion in a large bowl.\n2. **Whisk together** olive oil and lime juice in a small bowl; season with salt and pepper.\n3. **Drizzle** the dressing over the salad and gently toss to combine. Garnish with fresh cilantro and serve.\n\n> 💡 **Cook's Note:** Have fun customizing this avocado salad with your favorite add-ins such as sliced jalapeños and corn.\n\n---\n\n### 🥗 Nutrition Facts (Per Serving)\n\n| Nutrient | Amount | % Daily Value |\n|---|---|---|\n| **Calories** | 126 | — |\n| **Total Fat** | 10g | 13% |\n| **Saturated Fat** | 2g | 8% |\n| **Sodium** | 9mg | 0% |\n| **Total Carbohydrate** | 10g | 4% |\n| **Dietary Fiber** | 6g | **20%** |\n| **Total Sugars** | 3g | — |\n| **Protein** | 2g | 4% |\n| **Vitamin C** | 30mg | **33%** |\n| **Calcium** | 20mg | 2% |\n| **Iron** | 1mg | 3% |\n| **Potassium** | 474mg | **10%** |\n\n> *Percent Daily Values are based on a 2,000 calorie diet.*\n\n---\n\n### 🌟 Why It's Healthy:\n- ✅ **Only 126 calories** per serving\n- ✅ **High in Dietary Fiber** (6g / 20% DV) — great for digestion\n- ✅ **Rich in Vitamin C** (33% DV) — boosts immunity\n- ✅ **Good source of Potassium** (474mg / 10% DV) — supports heart health\n- ✅ **Very low in Sodium** (only 9mg) — heart-friendly\n- ✅ **No added sugars**, just 3g of natural sugars\n- ✅ Avocados provide **healthy monounsaturated fats**\n\nThis recipe has been made by **854 home cooks** on Allrecipes and is a quick, no-cook, nutritious salad perfect for any meal!",
+      "agentStatus": "success",
+      "steps": 34,
+      "tokens": 280292,
+      "durationMs": 335024,
+      "judgePass": true,
+      "judgeReason": "The agent successfully found a recipe for an avocado salad on Allrecipes. The recipe has a preparation time of 15 minutes, which is less than the requested 20 minutes. It also has 248 reviews, exceeding the requirement of more than 30. Finally, the agent included the nutritional information per serv",
+      "trial": 1
+    },
+    {
+      "id": "Allrecipes--42",
+      "web_name": "Allrecipes",
+      "question": "Find a recipe for banana bread with more than 200 reviews and a rating of at least 4.0 stars on Allrecipes.",
+      "startUrl": "https://www.allrecipes.com/",
+      "agentResult": "I have found the perfect banana bread recipe on Allrecipes that meets all the criteria. Here's a summary:\n\n---\n\n## 🍌 **Best Ever Banana Bread** on Allrecipes\n\n**URL:** https://www.allrecipes.com/recipe/20144/banana-banana-bread/\n\n### ✅ Criteria Met:\n| Criteria | Requirement | Actual |\n|----------|-------------|--------|\n| **Reviews** | More than 200 | **1,953 Reviews** ✅ |\n| **Rating** | At least 4.0 stars | **4.8 out of 5 stars** ✅ |\n| **Total Ratings** | — | 2,447 ratings |\n\n### 📋 Recipe Description:\n> *\"This is my best ever banana bread recipe. It really is the best I have ever tasted! It's very moist and it freezes well. I also bake this in 3 small loaf pans however you may need to shorten the baking time.\"*\n\n**By:** Rose | **Updated:** November 5, 2025 | **Photos:** 344\n\nThis recipe is a huge hit on Allrecipes — with nearly **2,000 written reviews** and a stellar **4.8-star rating** out of 5, it far exceeds the minimum requirements of 200+ reviews and a 4.0+ star rating!",
+      "agentStatus": "success",
+      "steps": 7,
+      "tokens": 42360,
+      "durationMs": 71808,
+      "judgePass": true,
+      "judgeReason": "The agent successfully found a banana bread recipe on Allrecipes. The screenshot confirms the recipe 'Best Ever Banana Bread' has a rating of 4.8 out of 5 stars (meeting the 'at least 4.0 stars' criteria) and has 1,953 reviews (meeting the 'more than 200 reviews' criteria). Both conditions were met ",
+      "trial": 2
+    },
+    {
+      "id": "Google Search--27",
+      "web_name": "Google Search",
+      "question": "Check the current air quality index in Paris.",
+      "startUrl": "https://www.google.com/",
+      "agentResult": "I now have detailed information about the current air quality in Paris from IQAir. Here is a summary of the current air quality in Paris:\n\n---\n\n## 🌿 Current Air Quality in Paris\n\n**Source:** IQAir (iqair.com) | **As of:** 00:00, March 10 (Local Time)\n\n| Parameter | Value |\n|---|---|\n| **AQI (US)** | **47** |\n| **Category** | ✅ **Good** |\n| **Main Pollutant** | PM2.5 |\n| **PM2.5 Concentration** | 8.5 µg/m³ |\n\n### 🌤️ Weather Conditions:\n- **Temperature:** 12°C\n- **Wind Speed:** 2 km/h\n- **Humidity:** 81%\n\n---\n\n**Interpretation:** An AQI of **47** falls in the **\"Good\"** category (0–50 range), which means air quality is considered satisfactory and air pollution poses **little or no risk**. It's a great day to be outdoors in Paris! 🌱",
+      "agentStatus": "success",
+      "steps": 5,
+      "tokens": 28333,
+      "durationMs": 27755,
+      "judgePass": true,
+      "judgeReason": "The agent successfully checked the current air quality index in Paris. The screenshot clearly displays the air quality index (AQI) for Paris, which is 47 (Good), along with other relevant details such as the main pollutant and weather conditions. The agent's reasoning accurately summarizes this info",
+      "trial": 1
+    }
+  ]
+}

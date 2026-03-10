@@ -1,7 +1,7 @@
-import type { BrowserTab } from "../browser/tab.js";
-import type { ActionExecution, Action, TaskState } from "../types.js";
-import type { StateStore } from "./state.js";
-import { LumenLogger } from "../logger.js";
+import type { BrowserTab } from "../browser/tab";
+import type { ActionExecution, Action, TaskState } from "../types";
+import type { StateStore } from "./state";
+import { LumenLogger } from "../logger";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

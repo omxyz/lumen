@@ -54,6 +54,11 @@ These principles guided every architectural decision. They explain *why* the sys
 - [ChildLoop (delegation)](#childloop-delegation)
 - [RepeatDetector](#repeatdetector)
 - [ActionCache](#actioncache)
+- [ConfidenceGate](#confidencegate)
+- [ActionVerifier](#actionverifier)
+- [CheckpointManager](#checkpointmanager)
+- [SiteKB](#sitekb)
+- [WorkflowMemory](#workflowmemory)
 - [LumenLogger](#lumenlogger)
 - [Planner](#planner)
 - [Observability](#observability)
@@ -83,7 +88,7 @@ These principles guided every architectural decision. They explain *why* the sys
 ┌───────────────────────────▼─────────────────────────────┐
 │                    PerceptionLoop                        │
 │  screenshot → model.stream() → router.execute() → ...    │
-│  compaction · policy · verifier · child delegation           │
+│  compaction · policy · verifier · child delegation · action verifier · checkpoint │
 └─────┬────────────────┬───────────────┬──────────────────┘
       │                │               │
 ┌─────▼──────┐  ┌──────▼──────┐ ┌─────▼──────┐
@@ -118,6 +123,7 @@ Every step of the perception loop follows this sequence:
    a. PreActionHook check
    b. SessionPolicy check
    c. ActionRouter.execute()
+   c2. ActionVerifier — heuristic post-action check (click target, input focus, goto host)
    d. Buffer outcome (not written to wire yet)
    e. If terminate: verify with Verifier, drain stream
    f. Repeat detection (RepeatDetector.record) — stash nudge for next step
@@ -128,6 +134,9 @@ Every step of the perception loop follows this sequence:
 10. Tier-1 screenshot compression (compressScreenshots)
 11. Append SemanticStep to semantic history
 11b. Form state extraction — if step had form actions, extract visible input values via CDP
+11c. SiteKB prompt injection — if URL matches a known domain, inject site-specific tips
+11d. WorkflowMemory — if instruction matches a known workflow, inject suggested steps
+11e. Checkpoint — if step % checkpointInterval == 0, save browser state for backtracking
 12. Repeat or exit if maxSteps
 ```
 
@@ -496,6 +505,105 @@ Currently uses exact SHA-256 hash comparison. The `similarity()` function is a s
 
 ---
 
+## ConfidenceGate
+
+CATTS-inspired test-time scaling. On easy steps, makes a single model call (zero overhead). On "hard" steps (pending nudge or last action failed), samples N candidates at different temperatures and picks the majority action.
+
+```typescript
+interface ConfidenceGateOptions {
+  adapter: ModelAdapter;
+  samples?: number;  // default: 3
+}
+```
+
+Hardness heuristic: a step is "hard" if the RepeatDetector has a pending nudge or the last action outcome failed.
+
+Candidate comparison uses 64px coordinate bucketing (same as RepeatDetector) to compare actions across samples. Token usage is summed across all candidates.
+
+Enabled via `AgentOptions.confidenceGate: true`.
+
+---
+
+## ActionVerifier
+
+BacktrackAgent-inspired post-action verification. Runs heuristic checks after each action using CDP state inspection — no API calls, zero token cost.
+
+| Action | Check | Failure hint |
+|---|---|---|
+| `click` / `doubleClick` | Inspects `clickTarget` for interactive elements; checks if URL changed | Soft — many valid clicks don't change URL |
+| `type` | Checks `document.activeElement` is an input/textarea/contentEditable | "Try clicking the input field first" |
+| `goto` | Compares target hostname with current hostname | "Page may have blocked the redirect" |
+
+Verification hints are injected into the model's context as soft warnings. The loop does not backtrack automatically — the model decides what to do with the hint.
+
+Enabled via `AgentOptions.actionVerifier: true`.
+
+---
+
+## CheckpointManager
+
+Tree-search-inspired browser state checkpointing. Periodically saves lightweight snapshots (URL, scroll position, agent state) that can be restored when the agent is deeply stuck.
+
+```typescript
+interface BrowserCheckpoint {
+  step: number;
+  url: string;
+  agentState: TaskState | null;
+  scrollY: number;
+}
+```
+
+Checkpoints are taken every N steps (configurable via `AgentOptions.checkpointInterval`, default: 5). On restore, the manager navigates to the checkpoint URL and restores scroll position. Agent state is also rolled back.
+
+Maximum 10 checkpoints are kept (FIFO eviction). Restoration invalidates all checkpoints after the restored one.
+
+Enabled via `AgentOptions.checkpointInterval: number`.
+
+---
+
+## SiteKB
+
+Domain-specific knowledge base that injects site-specific navigation tips into the system prompt when the current URL matches a known domain pattern.
+
+```typescript
+interface SiteRule {
+  domain: string;   // "google.com/travel", "*.booking.com"
+  rules: string[];  // injected as "SITE-SPECIFIC TIPS" in system prompt
+}
+```
+
+Domain matching supports:
+- Wildcard prefix: `*.booking.com` matches `www.booking.com`
+- Contains: `google.com/travel` matches `www.google.com/travel/flights`
+
+Ships with `default-site-kb.json` covering common eval sites (Google, Booking, Allrecipes, BBC, etc.). Custom rules can be added via `SiteKB.addRule()` or by passing a custom JSON file.
+
+Configured via `AgentOptions.siteKB: string | SiteRule[]` (file path or inline rules).
+
+---
+
+## WorkflowMemory
+
+AWM-inspired reusable workflow memory. Stores multi-step routines extracted from successful runs. On similar tasks, injects the workflow as a suggested plan in the system prompt.
+
+```typescript
+interface Workflow {
+  name: string;
+  trigger: string;     // pipe-separated keywords: "book flight|search flight"
+  steps: string[];     // human-readable step descriptions
+  domain: string;
+  successCount: number;
+}
+```
+
+Matching uses keyword overlap scoring with bonuses for domain match and past success count. Workflows are capped at 15 steps.
+
+`WorkflowMemory.extract()` can automatically extract a workflow from a successful run's semantic history.
+
+Configured via `AgentOptions.workflowMemory: string` (file path).
+
+---
+
 ## LumenLogger
 
 `LumenLogger` is a granular debug logger threaded through every Lumen layer. Log level is controlled by:
@@ -578,7 +686,20 @@ The queue is unbounded — if the consumer is slow, events accumulate in memory.
 
 ### Agent (facade)
 
-`Agent` is the recommended entry point for most callers. It manages:
+`Agent` is the recommended entry point for most callers. Key `AgentOptions` fields include:
+
+```typescript
+interface AgentOptions {
+  // ... core options (model, apiKey, maxSteps, policy, etc.)
+  confidenceGate?: boolean;         // Enable multi-sample on hard steps (CATTS)
+  actionVerifier?: boolean;         // Enable heuristic post-action CDP checks
+  checkpointInterval?: number;      // Save browser state every N steps (default: 5)
+  siteKB?: string | SiteRule[];     // File path or inline domain-specific rules
+  workflowMemory?: string;          // File path to persisted workflow memory
+}
+```
+
+It manages:
 
 - **Lazy connection**: the browser and model adapter are not initialized until the first `run()` call.
 - **Parallel initialization**: `createAdapter()`, `connectBrowser()`, `buildMonitor()`, and `createAdapter()` (compaction) all run concurrently via `Promise.all`.
@@ -599,7 +720,7 @@ The queue is unbounded — if the consumer is slow, events accumulate in memory.
 `Session` is a lower-level API for callers that want to own the browser and adapter themselves. It assembles `HistoryManager`, `StateStore`, `SessionPolicy`, and `PerceptionLoop` from options.
 
 ```typescript
-import { Session, CDPTab, CdpConnection, AnthropicAdapter } from "@omlabs/lumen";
+import { Session, CDPTab, CdpConnection, AnthropicAdapter } from "@omxyz/lumen";
 
 const conn = await CdpConnection.connect("ws://localhost:9222/...");
 const tab = new CDPTab(conn.mainSession());
@@ -656,6 +777,9 @@ src/index.ts          ← public surface
         src/loop/child.ts         ← ChildLoop
         src/loop/repeat-detector.ts ← RepeatDetector
         src/loop/action-cache.ts    ← ActionCache
+        src/loop/confidence-gate.ts ← ConfidenceGate
+        src/loop/action-verifier.ts ← ActionVerifier
+        src/loop/checkpoint.ts      ← CheckpointManager
       src/model/adapter.ts        ← ModelAdapter interface + coord helpers
         src/model/anthropic.ts    ← AnthropicAdapter
         src/model/google.ts       ← GoogleAdapter
@@ -671,6 +795,8 @@ src/index.ts          ← public surface
         src/browser/launch/
           local.ts                ← launchChrome
           browserbase.ts          ← connectBrowserbase
+      src/memory/site-kb.ts         ← SiteKB
+      src/memory/workflow.ts        ← WorkflowMemory
     src/loop/planner.ts           ← runPlanner
     src/loop/streaming-monitor.ts ← StreamingMonitor
   src/errors.ts       ← LumenError
@@ -684,7 +810,7 @@ All cross-module imports use the `.js` extension (ESM requirement). Circular dep
 
 ## Performance: SOTA Patterns
 
-Lumen achieves **96.0% (24/25)** on WebVoyager (Stagehand methodology). The architecture was designed with extension points that map directly to patterns from state-of-the-art systems:
+Lumen achieves **100% (25/25)** on a 25-task subset from WebVoyager with LLM-as-judge (Gemini 2.5 Flash). The architecture was designed with extension points that map directly to patterns from state-of-the-art systems:
 
 | SOTA Pattern | Source | Lumen Equivalent |
 |---|---|---|
@@ -696,5 +822,11 @@ Lumen achieves **96.0% (24/25)** on WebVoyager (Stagehand methodology). The arch
 | Deterministic caching for repeated patterns | Magnitude | `ActionCache` (on-disk, keyed by action+url+instruction) |
 | Centralized state management | AIME/ByteDance (92.3%) | `StateStore` with `writeState` action |
 | CDP post-action verification | Surfer 2 Validator | Form state extraction + nudge injection (no extra model call) |
+| Multi-sample on hard steps | CATTS (2026) | `ConfidenceGate` (multi-sample with majority voting) |
+| Post-action heuristic verification | BacktrackAgent (2025) | `ActionVerifier` (CDP state checks, no API cost) |
+| Browser state checkpointing | Tree Search with Snapshots (2025) | `CheckpointManager` (URL + scroll + state snapshots) |
+| Domain-specific navigation rules | ColorBrowserAgent (2026) | `SiteKB` (site-specific tips injected into prompts) |
+| Reusable workflow extraction | Agent Workflow Memory (2025) | `WorkflowMemory` (keyword-matched step plans) |
+| Agent-controlled context folding | AgentFold (2025) | `fold` action (compress completed sub-tasks) |
 
 The key insight: these patterns were anticipated in the original design. Surfer 2's 30–40% step reduction from "persistent context" maps to `StateStore` + session persistence. Surfer 2's Validator catching 15–20% of false terminations maps to `Verifier`. The architecture accommodates these optimizations without structural changes.

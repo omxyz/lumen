@@ -1,4 +1,4 @@
-import type { Action } from "../types.js";
+import type { Action } from "../types";
 
 export interface SessionPolicyResult {
   allowed: boolean;

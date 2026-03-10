@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { ChildLoop } from "../../src/loop/child.js";
-import { MockBrowserTab } from "./mock-tab.js";
-import { MockAdapter } from "./mock-adapter.js";
+import { ChildLoop } from "../../src/loop/child";
+import { MockBrowserTab } from "./mock-tab";
+import { MockAdapter } from "./mock-adapter";
 
 describe("ChildLoop", () => {
   it("returns success when child terminates successfully", async () => {

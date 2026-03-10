@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { PerceptionLoop } from "../../src/loop/perception.js";
-import { HistoryManager } from "../../src/loop/history.js";
-import { StateStore } from "../../src/loop/state.js";
-import { SessionPolicy } from "../../src/loop/policy.js";
-import { MockBrowserTab } from "./mock-tab.js";
-import { MockAdapter } from "./mock-adapter.js";
+import { PerceptionLoop } from "../../src/loop/perception";
+import { HistoryManager } from "../../src/loop/history";
+import { StateStore } from "../../src/loop/state";
+import { SessionPolicy } from "../../src/loop/policy";
+import { MockBrowserTab } from "./mock-tab";
+import { MockAdapter } from "./mock-adapter";
 
 describe("Policy integration within loop", () => {
   it("blocked action is not dispatched to browser", async () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { UrlMatchesGate, CustomGate } from "../../src/loop/verifier.js";
-import type { ScreenshotResult } from "../../src/types.js";
+import { UrlMatchesGate, CustomGate } from "../../src/loop/verifier";
+import type { ScreenshotResult } from "../../src/types";
 
 const mockScreenshot: ScreenshotResult = {
   data: Buffer.from(""),

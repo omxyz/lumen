@@ -1,0 +1,29 @@
+# Lumen
+
+> Vision-first browser agent for Node.js
+
+## Docs
+
+- [Quickstart](https://lumen.omxyz.dev/guide/quickstart): Install and run your first browser agent in under a minute
+- [Getting Started](https://lumen.omxyz.dev/guide/getting-started): Full setup guide with multi-run sessions, streaming, browser options, and safety
+- [Best Practices](https://lumen.omxyz.dev/guide/best-practices): Tips for building reliable browser agents
+- [Basic Usage](https://lumen.omxyz.dev/guide/use-cases/basic): One-shot tasks, multi-run sessions, streaming events, pre-navigation
+- [Data Extraction](https://lumen.omxyz.dev/guide/use-cases/data-extraction): Extracting structured data from web pages
+- [Verifying Completion](https://lumen.omxyz.dev/guide/use-cases/verification): UrlMatchesGate, ModelVerifier, CustomGate, and ActionVerifier
+- [Safety & Control](https://lumen.omxyz.dev/guide/use-cases/safety): Domain restriction and pre-action hooks
+- [Navigating Tricky Sites](https://lumen.omxyz.dev/guide/use-cases/site-knowledge): SiteKB domain-matched rules for site-specific quirks
+- [Browser Connections](https://lumen.omxyz.dev/guide/use-cases/browsers): Local Chrome, CDP endpoints, and Browserbase cloud browsers
+- [Model Configuration](https://lumen.omxyz.dev/guide/use-cases/models): Provider selection, local models, extended thinking, planner model
+- [Session Management](https://lumen.omxyz.dev/guide/use-cases/sessions): Serialize and resume agent sessions
+- [Error Handling & Retries](https://lumen.omxyz.dev/guide/use-cases/error-handling): API retries, action error recovery, fatal errors
+- [Action Caching](https://lumen.omxyz.dev/guide/use-cases/caching): Cache model decisions for repeated tasks
+- [Stealth & Anti-Detection](https://lumen.omxyz.dev/guide/use-cases/stealth): Browserbase, persistent profiles, pre-configured Chrome
+- [Observability](https://lumen.omxyz.dev/guide/use-cases/observability): Logging, tracing, and debugging agent runs
+- [Evaluations](https://lumen.omxyz.dev/guide/use-cases/evaluations): WebVoyager eval framework with LLM judge and retry
+- [MCP Integration](https://lumen.omxyz.dev/guide/use-cases/mcp): Wrap Lumen as an MCP tool server
+- [Advanced](https://lumen.omxyz.dev/guide/use-cases/advanced): Advanced patterns and configuration
+- [Architecture Overview](https://lumen.omxyz.dev/architecture/overview): How Lumen works internally
+- [Comparison](https://lumen.omxyz.dev/architecture/comparison): Lumen vs other browser agent frameworks
+- [API Reference](https://lumen.omxyz.dev/reference/api): Full API documentation
+- [API Options](https://lumen.omxyz.dev/reference/options): All configuration options
+- [Papers & Projects](https://lumen.omxyz.dev/reference/references): Research papers and related projects

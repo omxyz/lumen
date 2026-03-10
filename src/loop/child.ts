@@ -1,8 +1,8 @@
-import type { BrowserTab } from "../browser/tab.js";
-import type { ModelAdapter } from "../model/adapter.js";
-import { HistoryManager } from "./history.js";
-import { StateStore } from "./state.js";
-import { PerceptionLoop } from "./perception.js";
+import type { BrowserTab } from "../browser/tab";
+import type { ModelAdapter } from "../model/adapter";
+import { HistoryManager } from "./history";
+import { StateStore } from "./state";
+import { PerceptionLoop } from "./perception";
 
 export interface ChildLoopOptions {
   maxSteps?: number;  // default: 20

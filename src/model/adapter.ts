@@ -1,4 +1,4 @@
-import type { Action, ScreenshotResult, TaskState, TokenUsage, ViewportSize, WireMessage } from "../types.js";
+import type { Action, ScreenshotResult, TaskState, TokenUsage, ViewportSize, WireMessage } from "../types";
 
 // ─── Retry utility ───────────────────────────────────────────────────────────
 

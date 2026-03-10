@@ -1,0 +1,57 @@
+{
+  "timestamp": "2026-03-09T22:35:48.827Z",
+  "framework": "lumen",
+  "model": "anthropic/claude-sonnet-4-6",
+  "judgeModel": "gemini-2.5-flash",
+  "trials": 3,
+  "total": 3,
+  "passed": 3,
+  "passRate": 1,
+  "avgSteps": 34,
+  "avgTokens": 251897,
+  "avgDurationMs": 199313,
+  "results": [
+    {
+      "id": "Allrecipes--22",
+      "web_name": "Allrecipes",
+      "question": "Find a recipe for a healthy avocado salad on Allrecipes that has a preparation time of less than 20 minutes and more than 30 user reviews. Include the nutritional information per serving.",
+      "startUrl": "https://www.allrecipes.com/",
+      "agentResult": "**Recipe: Avocado Salad**\n**Source:** Allrecipes.com\n**URL:** https://www.allrecipes.com/recipe/19960/avocado-salad/\n\n**Why This Recipe Qualifies:**\n- ✅ Healthy avocado salad\n- ✅ Preparation time: 15 minutes (less than 20 minutes total)\n- ✅ More than 30 user reviews (has hundreds of ratings)\n\n**Nutritional Information (per serving):**\n- **Calories:** 126\n- **Fat:** 10g\n- **Carbohydrates:** 10g\n- **Protein:** 2g\n\n**Recipe Details:**\nThis simple avocado salad combines fresh avocados with tomatoes, onion, and seasonings. It requires no cooking — just chopping and mixing — making the total prep time only 15 minutes. The recipe is a popular, highly-rated healthy salad on Allrecipes with well over 30 user reviews.",
+      "agentStatus": "success",
+      "steps": 48,
+      "tokens": 357568,
+      "durationMs": 265657,
+      "judgePass": true,
+      "judgeReason": "The agent successfully found a recipe for an avocado salad on Allrecipes.com. It explicitly states that the preparation time is 15 minutes, which is less than 20 minutes, and that it has more than 30 user reviews (hundreds). The nutritional information per serving, including calories, fat, carbohydr",
+      "trial": 1
+    },
+    {
+      "id": "Cambridge Dictionary--31",
+      "web_name": "Cambridge Dictionary",
+      "question": "Look up the use of modal verbs in grammar section for expressing possibility (e.g., 'might', 'could', 'may') and find examples of their usage in sentences on the Cambridge Dictionary.",
+      "startUrl": "https://dictionary.cambridge.org/",
+      "agentResult": "## Modal Verbs for Expressing Possibility - Cambridge Dictionary Grammar Section\n\n### Overview\nModal verbs **might**, **could**, and **may** are used to express possibility in English. They are all followed by the base form of the verb (no \"to\").\n\n---\n\n### MIGHT\n**Usage:** Expresses weak or uncertain possibility (lowest probability of the three)\n**Example sentences from Cambridge Dictionary:**\n- *\"I **might** go to Japan for a month.\"* (weak possibility)\n- *\"**Might** I ask your name?\"* (formal permission)\n- *\"**Might** I interrupt you for a moment?\"* (formal permission)\n- *\"You **might** like to try one of our wonderful desserts.\"* (polite suggestion)\n- *\"**Might** I ask you a question?\"* (very formal permission)\n\n---\n\n### MAY\n**Usage:** Expresses possibility; slightly more formal and slightly more certain than *might*\n**Example sentences:**\n- *\"She **may** be at home.\"* (possibility)\n\n---\n\n### COULD\n**Usage:** Expresses possibility, often when something is one of several options\n**Example sentences:**\n- *\"It **could** rain later.\"* (possibility)\n\n---\n\n### Key Grammar Rules\n1. All three modals (**might**, **may**, **could**) are followed by the **base form** of the verb (no \"to\")\n2. **Might** suggests the **weakest probability**\n3. **May** is slightly **more formal** and slightly more certain than *might*\n4. **Could** suggests something is **possible among other options**\n5. In questions asking for permission, *might* is very formal; **can/could** are generally preferred in everyday speech\n\n### Certainty Scale (most → least certain):\n**May** > **Could** > **Might**\n\n---\n\n*Source: Cambridge Dictionary Grammar Section — https://dictionary.cambridge.org/grammar/british-grammar/might*",
+      "agentStatus": "success",
+      "steps": 47,
+      "tokens": 347465,
+      "durationMs": 262716,
+      "judgePass": true,
+      "judgeReason": "The agent successfully looked up the use of modal verbs for expressing possibility ('might', 'could', 'may') in the Cambridge Dictionary grammar section. The agent provided clear explanations for each modal verb, including their specific nuances for expressing possibility, and extracted example sent",
+      "trial": 1
+    },
+    {
+      "id": "Booking--20",
+      "web_name": "Booking",
+      "question": "Locate a hotel in Rome with a good rating (7 or above) that offers free cancellation and breakfast included, for a three-night stay from April 24, 2026 to April 27, 2026, for two adults.",
+      "startUrl": "https://www.booking.com/",
+      "agentResult": "**NIK Rooms** is a hotel in Rome that meets all the specified criteria:\n\n- **Hotel Name**: NIK Rooms\n- **Location**: Vaticano Prati, Rome (1.6 miles from downtown, Subway Access)\n- **Rating**: 8.4 – Very Good (109 reviews) ✓ (above required 7+)\n- **Free Cancellation**: ✓ Yes (explicitly confirmed with a checkmark on the listing)\n- **Breakfast Included**: ✓ Yes (explicitly shown on the listing)\n- **Stay Duration**: 3 nights — Friday, April 24 to Monday, April 27, 2026 ✓\n- **Guests**: 2 adults ✓\n- **Room**: Double or Twin Room with Private External Bathroom\n- **Price**: $958 total for 3 nights (~$319/night)\n\nAll three filters (Good: 7+, Breakfast included, Free cancellation) are visibly active in the search results on Booking.com, confirming this hotel satisfies every requirement.",
+      "agentStatus": "success",
+      "steps": 7,
+      "tokens": 50659,
+      "durationMs": 69566,
+      "judgePass": true,
+      "judgeReason": "The agent successfully identified a hotel that meets all the specified criteria. The NIK Rooms hotel in Rome has a rating of 8.4 (above 7), offers free cancellation, and includes breakfast. The booking is correctly set for a three-night stay from April 24, 2026, to April 27, 2026, for two adults, as",
+      "trial": 2
+    }
+  ]
+}

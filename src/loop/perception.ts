@@ -1,21 +1,21 @@
-import type { BrowserTab } from "../browser/tab.js";
-import type { ModelAdapter, ModelResponse, StepContext } from "../model/adapter.js";
-import type { ActionExecution, Action, LoopOptions, LoopResult, PreActionHook, SemanticStep, TokenUsage } from "../types.js";
-import type { Verifier } from "./verifier.js";
-import type { LoopMonitor } from "./monitor.js";
-import { ConsoleMonitor } from "./monitor.js";
-import { StateStore } from "./state.js";
-import { HistoryManager } from "./history.js";
-import { ActionRouter, type RouterTiming } from "./router.js";
-import type { SessionPolicy } from "./policy.js";
-import { LumenLogger } from "../logger.js";
-import { RepeatDetector, nudgeMessage } from "./repeat-detector.js";
-import { ActionCache, screenshotHash } from "./action-cache.js";
-import type { ConfidenceGate } from "./confidence-gate.js";
-import type { ActionVerifier } from "./action-verifier.js";
-import type { CheckpointManager } from "./checkpoint.js";
-import type { SiteKB } from "../memory/site-kb.js";
-import type { WorkflowMemory } from "../memory/workflow.js";
+import type { BrowserTab } from "../browser/tab";
+import type { ModelAdapter, ModelResponse, StepContext } from "../model/adapter";
+import type { ActionExecution, Action, LoopOptions, LoopResult, PreActionHook, SemanticStep, TokenUsage } from "../types";
+import type { Verifier } from "./verifier";
+import type { LoopMonitor } from "./monitor";
+import { ConsoleMonitor } from "./monitor";
+import { StateStore } from "./state";
+import { HistoryManager } from "./history";
+import { ActionRouter, type RouterTiming } from "./router";
+import type { SessionPolicy } from "./policy";
+import { LumenLogger } from "../logger";
+import { RepeatDetector, nudgeMessage } from "./repeat-detector";
+import { ActionCache, screenshotHash } from "./action-cache";
+import type { ConfidenceGate } from "./confidence-gate";
+import type { ActionVerifier } from "./action-verifier";
+import type { CheckpointManager } from "./checkpoint";
+import type { SiteKB } from "../memory/site-kb";
+import type { WorkflowMemory } from "../memory/workflow";
 
 const CUA_TOOLS: Action["type"][] = [
   "click", "doubleClick", "drag", "scroll",

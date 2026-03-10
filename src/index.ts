@@ -1,13 +1,13 @@
 // Public API — primary entry point
-export { Agent } from "./agent.js";
-export type { AgentOptions, SerializedAgent, BrowserOptions } from "./types.js";
+export { Agent } from "./agent";
+export type { AgentOptions, SerializedAgent, BrowserOptions } from "./types";
 
 // Logger
-export { LumenLogger } from "./logger.js";
+export { LumenLogger } from "./logger";
 
 // Session API
-export { Session } from "./session.js";
-export type { SessionOptions } from "./session.js";
+export { Session } from "./session";
+export type { SessionOptions } from "./session";
 
 // Types
 export type {
@@ -30,64 +30,64 @@ export type {
   Point,
   PreActionHook,
   PreActionDecision,
-} from "./types.js";
+} from "./types";
 
 // Errors
-export { LumenError } from "./errors.js";
-export type { LumenErrorCode } from "./errors.js";
+export { LumenError } from "./errors";
+export type { LumenErrorCode } from "./errors";
 
 // Browser
-export type { BrowserTab, ClickOptions, TypeOptions, DragOptions } from "./browser/tab.js";
-export { CDPTab } from "./browser/cdptab.js";
-export { CdpConnection } from "./browser/cdp.js";
-export { ViewportManager } from "./browser/viewport.js";
-export { launchChrome } from "./browser/launch/local.js";
-export { connectBrowserbase } from "./browser/launch/browserbase.js";
-export type { BrowserbaseOptions } from "./browser/launch/browserbase.js";
+export type { BrowserTab, ClickOptions, TypeOptions, DragOptions } from "./browser/tab";
+export { CDPTab } from "./browser/cdptab";
+export { CdpConnection } from "./browser/cdp";
+export { ViewportManager } from "./browser/viewport";
+export { launchChrome } from "./browser/launch/local";
+export { connectBrowserbase } from "./browser/launch/browserbase";
+export type { BrowserbaseOptions } from "./browser/launch/browserbase";
 
 // Model adapters
-export type { ModelAdapter, StepContext, ModelResponse } from "./model/adapter.js";
-export { denormalize, normalize, denormalizePoint } from "./model/adapter.js";
-export { ActionDecoder } from "./model/decoder.js";
-export { AnthropicAdapter } from "./model/anthropic.js";
-export { GoogleAdapter } from "./model/google.js";
-export { OpenAIAdapter } from "./model/openai.js";
-export { CustomAdapter } from "./model/custom.js";
+export type { ModelAdapter, StepContext, ModelResponse } from "./model/adapter";
+export { denormalize, normalize, denormalizePoint } from "./model/adapter";
+export { ActionDecoder } from "./model/decoder";
+export { AnthropicAdapter } from "./model/anthropic";
+export { GoogleAdapter } from "./model/google";
+export { OpenAIAdapter } from "./model/openai";
+export { CustomAdapter } from "./model/custom";
 
 // Loop primitives (for custom integrations)
-export { StateStore } from "./loop/state.js";
-export { HistoryManager } from "./loop/history.js";
-export { ActionRouter } from "./loop/router.js";
-export type { RouterTiming } from "./loop/router.js";
-export { PerceptionLoop } from "./loop/perception.js";
-export type { PerceptionLoopOptions } from "./loop/perception.js";
-export { ChildLoop } from "./loop/child.js";
-export type { ChildLoopOptions, ChildLoopResult } from "./loop/child.js";
-export { runPlanner } from "./loop/planner.js";
-export { RepeatDetector } from "./loop/repeat-detector.js";
-export { ActionCache } from "./loop/action-cache.js";
+export { StateStore } from "./loop/state";
+export { HistoryManager } from "./loop/history";
+export { ActionRouter } from "./loop/router";
+export type { RouterTiming } from "./loop/router";
+export { PerceptionLoop } from "./loop/perception";
+export type { PerceptionLoopOptions } from "./loop/perception";
+export { ChildLoop } from "./loop/child";
+export type { ChildLoopOptions, ChildLoopResult } from "./loop/child";
+export { runPlanner } from "./loop/planner";
+export { RepeatDetector } from "./loop/repeat-detector";
+export { ActionCache } from "./loop/action-cache";
 
 // Policy
-export { SessionPolicy } from "./loop/policy.js";
-export type { SessionPolicyOptions, SessionPolicyResult } from "./loop/policy.js";
+export { SessionPolicy } from "./loop/policy";
+export type { SessionPolicyOptions, SessionPolicyResult } from "./loop/policy";
 
 // Verifiers (completion gates)
-export { UrlMatchesGate, CustomGate, ModelVerifier } from "./loop/verifier.js";
-export type { Verifier, VerifyResult } from "./loop/verifier.js";
+export { UrlMatchesGate, CustomGate, ModelVerifier } from "./loop/verifier";
+export type { Verifier, VerifyResult } from "./loop/verifier";
 
 // Monitors
-export { ConsoleMonitor, NoopMonitor } from "./loop/monitor.js";
-export type { LoopMonitor } from "./loop/monitor.js";
-export { StreamingMonitor } from "./loop/streaming-monitor.js";
+export { ConsoleMonitor, NoopMonitor } from "./loop/monitor";
+export type { LoopMonitor } from "./loop/monitor";
+export { StreamingMonitor } from "./loop/streaming-monitor";
 
 // v2 features
-export { ConfidenceGate } from "./loop/confidence-gate.js";
-export type { ConfidenceGateOptions } from "./loop/confidence-gate.js";
-export { ActionVerifier } from "./loop/action-verifier.js";
-export type { ActionVerification } from "./loop/action-verifier.js";
-export { CheckpointManager } from "./loop/checkpoint.js";
-export type { BrowserCheckpoint } from "./loop/checkpoint.js";
-export { SiteKB } from "./memory/site-kb.js";
-export type { SiteRule } from "./memory/site-kb.js";
-export { WorkflowMemory } from "./memory/workflow.js";
-export type { Workflow } from "./memory/workflow.js";
+export { ConfidenceGate } from "./loop/confidence-gate";
+export type { ConfidenceGateOptions } from "./loop/confidence-gate";
+export { ActionVerifier } from "./loop/action-verifier";
+export type { ActionVerification } from "./loop/action-verifier";
+export { CheckpointManager } from "./loop/checkpoint";
+export type { BrowserCheckpoint } from "./loop/checkpoint";
+export { SiteKB } from "./memory/site-kb";
+export type { SiteRule } from "./memory/site-kb";
+export { WorkflowMemory } from "./memory/workflow";
+export type { Workflow } from "./memory/workflow";

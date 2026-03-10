@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { denormalize, normalize, denormalizePoint } from "../../src/model/adapter.js";
+import { denormalize, normalize, denormalizePoint } from "../../src/model/adapter";
 
 describe("denormalize", () => {
   it("converts 500 (50%) to half of dimension", () => {

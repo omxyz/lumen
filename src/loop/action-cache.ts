@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { promises as fs } from "fs";
 import { join } from "path";
-import type { Action } from "../types.js";
+import type { Action } from "../types";
 
 const COORD_ACTIONS = new Set(["click", "doubleClick", "hover", "scroll", "drag"]);
 const SIMILARITY_THRESHOLD = 0.92;

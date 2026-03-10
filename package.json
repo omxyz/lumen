@@ -1,5 +1,5 @@
 {
-  "name": "@omlabs/lumen",
+  "name": "@omxyz/lumen",
   "version": "0.1.0",
   "description": "Vision-first Computer Use Agent engine.",
   "type": "module",
@@ -23,7 +23,10 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "eval": "tsx --env-file .env evals/webvoyager/run.ts"
+    "eval": "tsx --env-file .env evals/webvoyager/run.ts",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -39,6 +42,7 @@
     "@types/ws": "^8.5.14",
     "tsx": "^4.21.0",
     "typescript": "^5.7.0",
+    "vitepress": "^1.6.4",
     "vitest": "^3.0.0"
   },
   "files": [
@@ -52,6 +56,6 @@
     "cua",
     "vision"
   ],
-  "author": "omlabs",
+  "author": "omxyz",
   "license": "MIT"
 }

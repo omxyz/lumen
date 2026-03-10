@@ -1,9 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { ModelAdapter, StepContext } from "./adapter.js";
-import type { ModelResponse } from "./adapter.js";
-import { withRetry } from "./adapter.js";
-import type { Action, TaskState, WireMessage } from "../types.js";
-import { ActionDecoder } from "./decoder.js";
+import type { ModelAdapter, StepContext } from "./adapter";
+import type { ModelResponse } from "./adapter";
+import { withRetry } from "./adapter";
+import type { Action, TaskState, WireMessage } from "../types";
+import { ActionDecoder } from "./decoder";
 
 const decoder = new ActionDecoder();
 

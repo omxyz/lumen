@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { ActionCache, screenshotHash } from "../../src/loop/action-cache.js";
+import { ActionCache, screenshotHash } from "../../src/loop/action-cache";
 import { promises as fs } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

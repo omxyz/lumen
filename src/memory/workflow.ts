@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from "fs";
-import type { SemanticStep, Action } from "../types.js";
+import type { SemanticStep, Action } from "../types";
 
 export interface Workflow {
   name: string;

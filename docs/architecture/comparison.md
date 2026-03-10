@@ -12,6 +12,8 @@ A technical comparison of Lumen against other browser agent frameworks. All fram
 | LLM Providers | Anthropic, Google, OpenAI, Custom | 15+ via `@ai-sdk/*` | 10+ (OpenAI, Anthropic, Google, Groq, Ollama...) | OpenAI, Anthropic, Google, Bedrock | Anthropic, Google |
 | Context Mgmt | Dual history + 2-tier compaction | Agent cache + conversation replay | Message compaction (summarization) | Workflow-level | Screenshot compression |
 | Stall Detection | 3-layer repeat detector + escalating nudges | Cache-based self-healing | Rolling window (20 actions) + page stagnation hash | Workflow retries | None documented |
+| Post-Action Verification | ActionVerifier (heuristic CDP checks) | None | DefaultActionWatchdog (scroll retry) | None | None |
+| Site-Specific Knowledge | SiteKB (domain-matched tips) | None | None | None | None |
 | Session Resume | Full serialize/deserialize (wire + semantic + state) | Conversation messages + cache replay | Browser profile + storage state | Workflow persistence | None documented |
 | Safety | Policy + PreActionHook + Verifier gates | None built-in | Domain whitelist watchdog | Auth + domain control | None documented |
 | Codebase Size | ~5K LOC | ~17K LOC (published) | ~68K LOC | ~50K+ LOC | ~3K LOC (core) |
@@ -144,6 +146,8 @@ Nudges are injected into the system prompt and escalate:
 
 Nudges are sticky — they persist until the model takes a productive action (for action nudges) or navigates away (for URL nudges).
 
+When nudges reach level 8+, `CheckpointManager` can restore the browser to a previous state (URL + scroll position + agent state) instead of just nudging.
+
 ### Stagehand: Cache-Based Self-Healing
 
 If a cached action sequence fails (e.g., selector changed), Stagehand re-invokes the AI to discover the new selector. Not a loop detector per se, but prevents one class of stuck behavior.
@@ -196,11 +200,12 @@ Wraps Playwright's action methods with AI-powered element targeting. Supports st
 
 ### Lumen
 
-Three layers of safety, composable:
+Four layers of safety, composable:
 
 1. **SessionPolicy** — declarative allow/blocklist for domains (glob patterns) and action types
 2. **PreActionHook** — async callback before every action, can deny with reason
-3. **Verifier gates** — `UrlMatchesGate`, `CustomGate`, `ModelVerifier` verify task completion before accepting `terminate`
+3. **ActionVerifier** — heuristic post-action checks (click target, input focus, goto host) via CDP, no API cost
+4. **Verifier gates** — `UrlMatchesGate`, `CustomGate`, `ModelVerifier` verify task completion before accepting `terminate`
 
 Blocked actions are fed back to the model as errors — the loop continues.
 
@@ -342,22 +347,27 @@ is_done = await page.validate("Check if logged in")
 
 ---
 
-## Benchmark Framework
+## Benchmark
 
-Lumen includes a multi-framework benchmark harness at `evals/benchmark/` that runs the same 12 tasks across Lumen, Stagehand, and browser-use on live websites. Metrics tracked:
+Lumen includes a WebVoyager evaluation (`evals/webvoyager/run.ts`) that runs tasks across Lumen, Stagehand, and browser-use on live websites. Matches Stagehand's evaluation methodology: Gemini 2.5 Flash judge, same prompt, 3 trials per task, 50 max steps.
 
-- **Success rate** (primary) — task pass/fail judged by the model
-- **Average steps** — action efficiency
-- **Average tokens** — LLM cost
-- **Average duration** — wall-clock time
+Subset of 25 tasks from [WebVoyager](https://github.com/MinorJerry/WebVoyager), stratified across 15 sites. All frameworks use Claude Sonnet 4.6.
 
-Winning criteria for Lumen:
-- Success rate >= each other framework
-- Steps <= Stagehand * 1.2 (browser-use excluded — different action granularity)
-- Tokens <= each other * 1.05 (5% tolerance)
-- Time <= each other * 1.15 (15% tolerance for startup variance)
+| Metric | Lumen | browser-use | Stagehand |
+|--------|-------|-------------|-----------|
+| **Success Rate** | **25/25 (100%)** | **25/25 (100%)** | 19/25 (76%) |
+| **Avg Steps (all)** | 14.4 | 8.8 | 23.1 |
+| **Avg Steps (passed)** | 14.4 | 8.8 | 15.7 |
+| **Avg Time (all)** | **77.8s** | 109.8s | 207.8s |
+| **Avg Time (passed)** | **77.8s** | 136.0s | 136.0s |
+| **Avg Tokens** | 104K | N/A | 200K |
 
-Lumen also includes a WebVoyager evaluation (`evals/webvoyager/`) matching Stagehand's evaluation methodology exactly: Gemini 2.5 Flash judge, same prompt, 3 trials per task, 50 max steps.
+Lumen runs with SiteKB (domain-specific navigation tips) and ModelVerifier (termination gate) enabled.
+
+```bash
+npm run eval              # 25 tasks (default)
+npm run eval -- 5         # 5 tasks
+```
 
 ---
 

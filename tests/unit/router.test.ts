@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import { ActionRouter } from "../../src/loop/router.js";
-import { StateStore } from "../../src/loop/state.js";
-import type { BrowserTab, ClickOptions, DragOptions, TypeOptions } from "../../src/browser/tab.js";
-import type { ActionOutcome, ScreenshotOptions, ScreenshotResult, ViewportSize } from "../../src/types.js";
+import { ActionRouter } from "../../src/loop/router";
+import { StateStore } from "../../src/loop/state";
+import type { BrowserTab, ClickOptions, DragOptions, TypeOptions } from "../../src/browser/tab";
+import type { ActionOutcome, ScreenshotOptions, ScreenshotResult, ViewportSize } from "../../src/types";
 
 // Simple in-line mock tab
 function makeMockTab(viewport: ViewportSize = { width: 1280, height: 720 }): BrowserTab {

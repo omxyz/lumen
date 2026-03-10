@@ -1,4 +1,4 @@
-import type { ModelAdapter, ModelResponse } from "../model/adapter.js";
+import type { ModelAdapter, ModelResponse } from "../model/adapter";
 import type {
   ActionExecution,
   Action,
@@ -7,7 +7,7 @@ import type {
   TaskState,
   TokenUsage,
   WireMessage,
-} from "../types.js";
+} from "../types";
 
 export class HistoryManager {
   private wire: WireMessage[] = [];

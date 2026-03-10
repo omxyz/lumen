@@ -1,7 +1,7 @@
-import type { CDPSessionLike } from "./cdp.js";
-import type { BrowserTab, ClickOptions, DragOptions, TypeOptions } from "./tab.js";
-import type { ActionOutcome, ScreenshotOptions, ScreenshotResult, ViewportSize } from "../types.js";
-import { LumenLogger } from "../logger.js";
+import type { CDPSessionLike } from "./cdp";
+import type { BrowserTab, ClickOptions, DragOptions, TypeOptions } from "./tab";
+import type { ActionOutcome, ScreenshotOptions, ScreenshotResult, ViewportSize } from "../types";
+import { LumenLogger } from "../logger";
 
 // CDP response shapes
 interface ScreenshotResponse { data: string }

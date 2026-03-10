@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { SessionPolicy } from "../../src/loop/policy.js";
+import { SessionPolicy } from "../../src/loop/policy";
 
 describe("SessionPolicy — domain matching", () => {
   it("allows navigation to an exact domain", () => {

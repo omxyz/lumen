@@ -1,4 +1,4 @@
-import type { TaskState } from "../types.js";
+import type { TaskState } from "../types";
 
 /** Last-write-wins agent memory. Written by the model via writeState.
  *  Re-injected every step — survives history compaction. */

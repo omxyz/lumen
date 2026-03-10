@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { HistoryManager } from "../../src/loop/history.js";
-import type { Action } from "../../src/types.js";
-import type { ModelResponse } from "../../src/model/adapter.js";
+import { HistoryManager } from "../../src/loop/history";
+import type { Action } from "../../src/types";
+import type { ModelResponse } from "../../src/model/adapter";
 
 /** Helper to make a response with explicit tool call IDs. */
 function makeResponseWithIds(

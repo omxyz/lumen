@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import type { Action } from "../types.js";
+import type { Action } from "../types";
 
 /**
  * Detects when the agent is stuck repeating actions or stalling on one page.

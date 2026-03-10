@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { PerceptionLoop } from "../../src/loop/perception.js";
-import { HistoryManager } from "../../src/loop/history.js";
-import { StateStore } from "../../src/loop/state.js";
-import { MockBrowserTab } from "./mock-tab.js";
-import { MockAdapter } from "./mock-adapter.js";
-import type { Action } from "../../src/types.js";
+import { PerceptionLoop } from "../../src/loop/perception";
+import { HistoryManager } from "../../src/loop/history";
+import { StateStore } from "../../src/loop/state";
+import { MockBrowserTab } from "./mock-tab";
+import { MockAdapter } from "./mock-adapter";
+import type { Action } from "../../src/types";
 
 describe("PreActionHook integration in PerceptionLoop", () => {
   it("hook can deny an action and the loop continues without dispatching to browser", async () => {

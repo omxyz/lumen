@@ -1,26 +1,26 @@
-import type { ModelAdapter } from "./model/adapter.js";
-import type { BrowserTab } from "./browser/tab.js";
-import type { Verifier } from "./loop/verifier.js";
-import type { LoopMonitor } from "./loop/monitor.js";
-import type { RouterTiming } from "./loop/router.js";
-import type { SessionPolicyOptions } from "./loop/policy.js";
-import { SessionPolicy } from "./loop/policy.js";
-import { StateStore } from "./loop/state.js";
-import { HistoryManager } from "./loop/history.js";
-import { PerceptionLoop } from "./loop/perception.js";
-import type { ConfidenceGate } from "./loop/confidence-gate.js";
-import type { ActionVerifier } from "./loop/action-verifier.js";
-import type { CheckpointManager } from "./loop/checkpoint.js";
-import type { SiteKB } from "./memory/site-kb.js";
-import type { WorkflowMemory } from "./memory/workflow.js";
+import type { ModelAdapter } from "./model/adapter";
+import type { BrowserTab } from "./browser/tab";
+import type { Verifier } from "./loop/verifier";
+import type { LoopMonitor } from "./loop/monitor";
+import type { RouterTiming } from "./loop/router";
+import type { SessionPolicyOptions } from "./loop/policy";
+import { SessionPolicy } from "./loop/policy";
+import { StateStore } from "./loop/state";
+import { HistoryManager } from "./loop/history";
+import { PerceptionLoop } from "./loop/perception";
+import type { ConfidenceGate } from "./loop/confidence-gate";
+import type { ActionVerifier } from "./loop/action-verifier";
+import type { CheckpointManager } from "./loop/checkpoint";
+import type { SiteKB } from "./memory/site-kb";
+import type { WorkflowMemory } from "./memory/workflow";
 import type {
   RunResult,
   PreActionHook,
   RunOptions,
   SerializedHistory,
   TaskState,
-} from "./types.js";
-import { LumenLogger } from "./logger.js";
+} from "./types";
+import { LumenLogger } from "./logger";
 
 export interface SessionOptions {
   /** Browser connection — bring your own tab (CDPTab, BrowserbaseTab, etc.) */

@@ -1,5 +1,5 @@
-import type { ModelAdapter, StepContext, ModelResponse } from "../../src/model/adapter.js";
-import type { Action, TaskState, WireMessage } from "../../src/types.js";
+import type { ModelAdapter, StepContext, ModelResponse } from "../../src/model/adapter";
+import type { Action, TaskState, WireMessage } from "../../src/types";
 
 export class MockAdapter implements ModelAdapter {
   readonly modelId = "mock-model";

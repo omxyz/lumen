@@ -1,5 +1,5 @@
-import type { Action, TaskState, ViewportSize } from "../types.js";
-import { denormalize } from "./adapter.js";
+import type { Action, TaskState, ViewportSize } from "../types";
+import { denormalize } from "./adapter";
 
 export class ActionDecoder {
   /** Anthropic tool_use block → Action. Coordinates are pixels — pass through directly. */

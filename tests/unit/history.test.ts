@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { HistoryManager } from "../../src/loop/history.js";
-import type { Action, SemanticStep } from "../../src/types.js";
-import type { ModelResponse } from "../../src/model/adapter.js";
+import { HistoryManager } from "../../src/loop/history";
+import type { Action, SemanticStep } from "../../src/types";
+import type { ModelResponse } from "../../src/model/adapter";
 
 function makeResponse(inputTokens: number): ModelResponse {
   return {

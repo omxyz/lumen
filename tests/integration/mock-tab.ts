@@ -1,5 +1,5 @@
-import type { BrowserTab, ClickOptions, DragOptions, TypeOptions } from "../../src/browser/tab.js";
-import type { ActionOutcome, ScreenshotOptions, ScreenshotResult, ViewportSize } from "../../src/types.js";
+import type { BrowserTab, ClickOptions, DragOptions, TypeOptions } from "../../src/browser/tab";
+import type { ActionOutcome, ScreenshotOptions, ScreenshotResult, ViewportSize } from "../../src/types";
 
 export interface MockTabCall {
   method: string;

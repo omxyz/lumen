@@ -1,4 +1,4 @@
-# @omlabs/lumen
+# @omxyz/lumen
 
 Vision-first browser agent for Node.js. Give it a task in plain English; it drives a real browser using screenshots and model-emitted actions to get it done.
 
@@ -18,7 +18,7 @@ Subset of 25 tasks from [WebVoyager](https://github.com/MinorJerry/WebVoyager), 
 All frameworks use Claude Sonnet 4.6 as the agent model.
 
 ```typescript
-import { Agent } from "@omlabs/lumen";
+import { Agent } from "@omxyz/lumen";
 
 const result = await Agent.run({
   model: "anthropic/claude-sonnet-4-6",
@@ -46,7 +46,7 @@ console.log(result.result);
 ## Install
 
 ```bash
-npm install @omlabs/lumen
+npm install @omxyz/lumen
 ```
 
 Requires Node.js ≥ 20.19 and Chrome/Chromium for local browser mode.
@@ -176,7 +176,7 @@ preActionHook: async (action) => {
 Verify the task is actually done before accepting `terminate`:
 
 ```typescript
-import { Agent, UrlMatchesGate, ModelVerifier, AnthropicAdapter } from "@omlabs/lumen";
+import { Agent, UrlMatchesGate, ModelVerifier, AnthropicAdapter } from "@omxyz/lumen";
 
 // URL pattern match
 verifier: new UrlMatchesGate(/\/confirmation\?order=\d+/)
@@ -337,11 +337,11 @@ The core is a **perception loop** — screenshot, think, act, repeat — running
 8. **Checkpoint** — periodically save browser state; backtrack on deep stalls (level 8+)
 9. **Termination gate** — when the model calls `task_complete`, the Verifier (ModelVerifier or custom) checks the screenshot to confirm. Rejected? Loop continues. Passed? Return result.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full breakdown.
+See [docs/architecture/overview.md](docs/architecture/overview.md) for the full breakdown.
 
-See [docs/HAPPY_PATH.md](docs/HAPPY_PATH.md) for annotated usage walkthroughs.
+See [docs/guide/happy-path.md](docs/guide/happy-path.md) for annotated usage walkthroughs.
 
-See [docs/COMPARISON.md](docs/COMPARISON.md) for a technical comparison with other browser agent frameworks.
+See [docs/architecture/comparison.md](docs/architecture/comparison.md) for a technical comparison with other browser agent frameworks.
 
 ## Troubleshooting
 

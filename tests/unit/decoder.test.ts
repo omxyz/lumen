@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ActionDecoder } from "../../src/model/decoder.js";
+import { ActionDecoder } from "../../src/model/decoder";
 
 const decoder = new ActionDecoder();
 const viewport = { width: 1280, height: 720 };

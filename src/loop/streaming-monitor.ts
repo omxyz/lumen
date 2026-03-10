@@ -1,7 +1,7 @@
-import type { Action, StreamEvent, RunResult, LoopResult } from "../types.js";
-import type { LoopMonitor } from "./monitor.js";
-import type { ModelResponse, StepContext } from "../model/adapter.js";
-import type { ActionExecution } from "../types.js";
+import type { Action, StreamEvent, RunResult, LoopResult } from "../types";
+import type { LoopMonitor } from "./monitor";
+import type { ModelResponse, StepContext } from "../model/adapter";
+import type { ActionExecution } from "../types";
 
 /**
  * A LoopMonitor that enqueues StreamEvent objects onto an internal queue.

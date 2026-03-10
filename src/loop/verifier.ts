@@ -1,5 +1,5 @@
-import type { ScreenshotResult } from "../types.js";
-import type { ModelAdapter } from "../model/adapter.js";
+import type { ScreenshotResult } from "../types";
+import type { ModelAdapter } from "../model/adapter";
 
 export interface VerifyResult {
   passed: boolean;

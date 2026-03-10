@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { StreamingMonitor } from "../../src/loop/streaming-monitor.js";
-import type { Action, RunResult } from "../../src/types.js";
-import type { ModelResponse, StepContext } from "../../src/model/adapter.js";
+import { StreamingMonitor } from "../../src/loop/streaming-monitor";
+import type { Action, RunResult } from "../../src/types";
+import type { ModelResponse, StepContext } from "../../src/model/adapter";
 
 const mockScreenshot = {
   data: Buffer.alloc(10, 0),
