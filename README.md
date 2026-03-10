@@ -362,16 +362,6 @@ See [docs/architecture/comparison.md](docs/architecture/comparison.md) for a tec
 
 Research papers and projects that influenced Lumen's design.
 
-### Projects
-
-| Project | Impact on Lumen |
-|---------|-----------------|
-| **[Stagehand](https://github.com/browserbase/stagehand)** | CUA mode reference — ActCache with DOM fingerprinting inspired self-healing deterministic replay |
-| **[browser-use](https://github.com/browser-use/browser-use)** | Vision + DOM hybrid architecture, multi-tab support, agent chain design |
-| **[Claude Code](https://claude.com/claude-code)** | Agentic loop design — tool-use pattern, streaming actions, context compaction strategy |
-
-### Papers
-
 | Paper | Impact on Lumen |
 |-------|-----------------|
 | **Surfer 2** — WebVoyager SOTA (97.1%) | `StateStore` + `Verifier` + `plannerModel` — persistent context, completion gate, orchestrator planning |
