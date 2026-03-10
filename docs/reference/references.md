@@ -6,7 +6,7 @@ Research papers and projects that influenced Lumen's design and implementation.
 
 | Project | Impact on Lumen |
 |---------|-----------------|
-| **Stagehand** — [github.com/browserbase/stagehand](https://github.com/browserbase/stagehand) | CUA mode reference — Playwright-based browser agent with observe/act/extract API |
+| **Stagehand** — [github.com/browserbase/stagehand](https://github.com/browserbase/stagehand) | CUA mode reference — Playwright-based browser agent with observe/act/extract API. ActCache with DOM fingerprinting inspired Lumen's self-healing deterministic replay |
 | **browser-use** — [github.com/browser-use/browser-use](https://github.com/browser-use/browser-use) | Python browser agent — vision + DOM hybrid, multi-tab support, agent chain architecture |
 | **Claude Code** — [claude.com/claude-code](https://claude.com/claude-code) | Agentic loop design — tool-use pattern, streaming actions, context compaction strategy |
 | **Ralph Loop** — [oh-my-claudecode](https://github.com/nicobailon/oh-my-claudecode) | Self-referential execution loop — iterate until verified complete, with architect verification gate |
