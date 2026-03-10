@@ -63,7 +63,7 @@ export default defineConfig({
       },
     ],
     socialLinks: [
-      { icon: "github", link: "https://github.com/AugmentedMind/lumen" },
+      { icon: "github", link: "https://github.com/omxyz/lumen" },
     ],
     search: {
       provider: "local",
