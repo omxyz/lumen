@@ -5,5 +5,6 @@ export default defineConfig({
     globals: true,
     environment: "node",
     reporter: "verbose",
+    include: ["tests/**/*.test.ts"],
   },
 });
