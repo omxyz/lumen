@@ -3,6 +3,66 @@ import { parseArgs } from "node:util";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { Agent } from "./index.js";
+import type { Action, LoopResult } from "./types.js";
+import type { LoopMonitor } from "./loop/monitor.js";
+import type { ModelResponse, StepContext } from "./model/adapter.js";
+import type { ActionExecution } from "./types.js";
+
+function describeAction(action: Action): string {
+  switch (action.type) {
+    case "click":       return `click at (${action.x}, ${action.y})`;
+    case "doubleClick": return `double-click at (${action.x}, ${action.y})`;
+    case "hover":       return `hover at (${action.x}, ${action.y})`;
+    case "drag":        return `drag (${action.startX}, ${action.startY}) → (${action.endX}, ${action.endY})`;
+    case "scroll":      return `scroll ${action.direction} at (${action.x}, ${action.y})`;
+    case "type":        return `type "${action.text.length > 60 ? action.text.slice(0, 60) + "…" : action.text}"`;
+    case "keyPress":    return `key press [${action.keys.join(" + ")}]`;
+    case "goto":        return `navigate to ${action.url}`;
+    case "wait":        return `wait ${action.ms}ms`;
+    case "screenshot":  return `take screenshot`;
+    case "writeState":  return `write state`;
+    case "delegate":    return `delegate: "${action.instruction}"`;
+    case "fold":        return `fold: "${action.summary.slice(0, 60)}${action.summary.length > 60 ? "…" : ""}"`;
+    case "terminate":   return `terminate (${action.status}): "${action.result.slice(0, 80)}${action.result.length > 80 ? "…" : ""}"`;
+    default:            return (action as Action).type;
+  }
+}
+
+class CLIMonitor implements LoopMonitor {
+  stepStarted(step: number, context: StepContext): void {
+    const stepLabel = context.maxSteps ? `step ${step + 1}/${context.maxSteps}` : `step ${step + 1}`;
+    console.log(`\n[${stepLabel}] ${context.url}`);
+  }
+
+  stepCompleted(_step: number, _response: ModelResponse): void {}
+
+  actionExecuted(step: number, action: Action, outcome: ActionExecution): void {
+    const desc = describeAction(action);
+    if (outcome.ok) {
+      console.log(`  → ${desc}`);
+    } else {
+      console.warn(`  → ${desc}  [failed: ${outcome.error}]`);
+    }
+  }
+
+  actionBlocked(step: number, action: Action, reason: string): void {
+    console.warn(`  → ${describeAction(action)}  [blocked: ${reason}]`);
+  }
+
+  terminationRejected(_step: number, reason: string): void {
+    console.warn(`  ! termination rejected: ${reason}`);
+  }
+
+  compactionTriggered(_step: number, tokensBefore: number, tokensAfter: number): void {
+    console.log(`  ~ compacting history: ${tokensBefore} → ${tokensAfter} tokens`);
+  }
+
+  terminated(_result: LoopResult): void {}
+
+  error(err: Error): void {
+    console.error(`  ! error: ${err.message}`);
+  }
+}
 
 function printHelp(): void {
   console.log(`
@@ -18,7 +78,7 @@ Options:
                             (default: local)
       --headless            Run browser headless (default)
       --no-headless         Run browser with visible UI
-  -s, --max-steps <n>       Cap agent iterations (default: 10)
+  -s, --max-steps <n>       Cap agent iterations (optional, library default: 30)
       --env-file <path>     .env file containing API key (default: .env)
   -h, --help                Show this help message
 
@@ -69,7 +129,7 @@ try {
       model: { type: "string", short: "m", default: "anthropic/claude-sonnet-4-6" },
       browser: { type: "string", short: "b", default: "local" },
       headless: { type: "boolean", default: true },
-      "max-steps": { type: "string", short: "s", default: "10" },
+      "max-steps": { type: "string", short: "s" },
       "env-file": { type: "string", default: ".env" },
       help: { type: "boolean", short: "h", default: false },
     },
@@ -97,8 +157,9 @@ if (!instruction) {
 const envFile = (values["env-file"] as string) ?? ".env";
 loadEnvFile(envFile);
 
-const maxSteps = parseInt((values["max-steps"] as string) ?? "10", 10);
-if (isNaN(maxSteps) || maxSteps < 1) {
+const maxStepsRaw = values["max-steps"] as string | undefined;
+const maxSteps = maxStepsRaw !== undefined ? parseInt(maxStepsRaw, 10) : undefined;
+if (maxSteps !== undefined && (isNaN(maxSteps) || maxSteps < 1)) {
   console.error("Error: --max-steps must be a positive integer");
   process.exit(1);
 }
@@ -127,6 +188,8 @@ const model = (values.model as string) ?? "anthropic/claude-sonnet-4-6";
       browser: { type: "local", headless },
       instruction,
       maxSteps,
+      monitor: new CLIMonitor(),
+      verbose: 0,
     });
 
     const statusLine =
@@ -138,7 +201,7 @@ const model = (values.model as string) ?? "anthropic/claude-sonnet-4-6";
 
     console.log(`\n${"─".repeat(60)}`);
     console.log(`Status : ${statusLine}`);
-    console.log(`Steps  : ${result.steps} / ${maxSteps}`);
+    console.log(`Steps  : ${result.steps}${maxSteps !== undefined ? ` / ${maxSteps}` : ""}`);
     console.log(`Tokens : ${result.tokenUsage.inputTokens} in / ${result.tokenUsage.outputTokens} out`);
     console.log(`${"─".repeat(60)}`);
     console.log(result.result);
