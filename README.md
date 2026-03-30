@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/@omxyz/lumen)](https://www.npmjs.com/package/@omxyz/lumen)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A vision-first browser agent with self-healing deterministic replay.
+[Jina's](https://usejina.com) underlying browser agent, also known as Lumen is a vision-first browser agent with self-healing deterministic replay. 
 
 ## WebVoyager Benchmark (preliminary)
 
